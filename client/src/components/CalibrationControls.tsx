@@ -7,10 +7,10 @@ const HEX_SIZES = [
   { mm: 25.4, note: 'standard miniatures' },
   { mm: 28, note: '' },
   { mm: 31.75, note: 'roomier' },
-  { mm: 38.1, note: 'large hexes' },
+  { mm: 38.1, note: 'large spaces' },
 ];
 
-/** DM controls for calibrating the Main Screen, so hexes have a real-world size. */
+/** DM controls for calibrating the Main Screen, so distances have a real-world size. */
 export function CalibrationControls({ store, table }: { store: GameStore; table: TableSettings }) {
   const { unit } = useSettings();
   const [error, setError] = useState<string | null>(null);
@@ -33,8 +33,8 @@ export function CalibrationControls({ store, table }: { store: GameStore; table:
       <div className="calib-controls">
         <p className="hint">
           {table.calibrated
-            ? `Calibrated. Hexes are ${formatLength(table.hexMm, unit)} wide on the Main Screen.`
-            : 'Not calibrated yet. Calibrate so hexes match your miniatures.'}
+            ? `Calibrated. 5 feet is ${formatLength(table.hexMm, unit)} on the Main Screen.`
+            : 'Not calibrated yet. Calibrate so distances match your miniatures (5 feet = 1 inch).'}
         </p>
         <button className="button block" onClick={() => send({ calibrating: true })} data-testid="calibrate">
           Calibrate the Main Screen
@@ -66,7 +66,7 @@ export function CalibrationControls({ store, table }: { store: GameStore; table:
         <button className="button small" onClick={() => setPx(local * 1.02)} aria-label="Much bigger">++</button>
       </div>
       <label>
-        Hex size on the table
+        5 feet on the table is
         <select value={table.hexMm} onChange={(e) => send({ hexMm: Number(e.target.value) })}>
           {HEX_SIZES.map((h) => (
             <option key={h.mm} value={h.mm}>

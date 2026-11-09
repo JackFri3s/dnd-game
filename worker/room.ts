@@ -25,7 +25,7 @@ import {
   type Area,
 } from '../shared/protocol.ts';
 import type { CampaignExport } from './campaign.ts';
-import { boardBounds, cellToHex, hexToPoint, hexesInRange, hexKey, onBoard, pointToHex } from '../shared/hex.ts';
+import { MIN_TOKEN_GAP, clampToBoard, dist, freeSpotNear, fromHex, onBoard, type Point } from '../shared/geometry.ts';
 
 /** A game nobody has connected to for this long is deleted. */
 const INACTIVE_GAME_TTL_MS = 180 * 24 * 60 * 60 * 1000; // ~6 months
@@ -39,7 +39,7 @@ interface StoredRoom {
   phase: Phase;
   table: TableSettings;
   view: { x: number; y: number };
-  board: { cols: number; rows: number };
+  board: { w: number; h: number };
   tokens: Record<string, Token>;
   highlight: Highlight | null;
   nextTokenId: number;
@@ -55,8 +55,34 @@ const KEY_LENGTH = 10;
 
 function emptyWorld(): World {
   const board = DEFAULT_BOARD;
-  const b = boardBounds(board);
-  return { board, tokens: {}, view: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [] };
+  return { board, tokens: {}, view: { x: board.w / 2, y: board.h / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [] };
+}
+
+/**
+ * Worlds saved before the map went gridless used hexes (q, r) and a board of
+ * columns and rows: convert them to free positions.
+ */
+function migrateWorld<T extends Partial<World>>(w: T): T {
+  const board = w.board as unknown as { cols?: number; rows?: number; w?: number; h?: number } | undefined;
+  if (board && board.cols !== undefined) {
+    w.board = { w: board.cols + 1, h: (board.rows ?? 28) * (Math.sqrt(3) / 2) + 0.6 };
+    if (w.view) w.view = { x: w.view.x + 0.5, y: w.view.y + 0.6 };
+  }
+  for (const t of Object.values(w.tokens ?? {})) {
+    const old = t as unknown as { q?: number; r?: number };
+    if (old.q !== undefined && old.r !== undefined) {
+      Object.assign(t, fromHex(old.q, old.r));
+      delete old.q;
+      delete old.r;
+    }
+  }
+  for (const a of w.areas ?? []) {
+    const o = a.origin as unknown as { q?: number; r?: number };
+    const t = a.target as unknown as { q?: number; r?: number };
+    if (o.q !== undefined) a.origin = fromHex(o.q, o.r!);
+    if (t.q !== undefined) a.target = fromHex(t.q, t.r!);
+  }
+  return w;
 }
 
 function worldOf(room: StoredRoom): World {
@@ -72,6 +98,7 @@ function worldOf(room: StoredRoom): World {
 }
 
 function applyWorld(room: StoredRoom, world: World) {
+  migrateWorld(world);
   room.board = world.board;
   room.tokens = world.tokens;
   room.view = world.view;
@@ -81,15 +108,15 @@ function applyWorld(room: StoredRoom, world: World) {
   room.areas = world.areas ?? [];
 }
 
-const DEFAULT_BOARD = { cols: 40, rows: 28 };
+const DEFAULT_BOARD = { w: 40, h: 25 };
 
 /** Fills in anything missing, e.g. for games saved by an older version of the app. */
 function withDefaults(room: Partial<StoredRoom> & Pick<StoredRoom, 'code' | 'tableId' | 'members' | 'createdAt'>): StoredRoom {
+  migrateWorld(room);
   const board = room.board ?? DEFAULT_BOARD;
-  const b = boardBounds(board);
   return {
     phase: 'lobby',
-    view: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 },
+    view: { x: board.w / 2, y: board.h / 2 },
     tokens: {},
     highlight: null,
     nextTokenId: 1,
@@ -294,8 +321,7 @@ export class GameRoom extends DurableObject<Env> {
 
       case 'view:set': {
         requireRole(me, 'dm', 'table');
-        const b = boardBounds(room.board);
-        room.view = { x: num(msg.x, b.minX, b.maxX), y: num(msg.y, b.minY, b.maxY) };
+        room.view = { x: num(msg.x, 0, room.board.w), y: num(msg.y, 0, room.board.h) };
         return this.commit(room);
       }
 
@@ -304,12 +330,13 @@ export class GameRoom extends DurableObject<Env> {
         if (!token) throw new GameError('Token not found.');
         if (!me) throw new GameError('You are not in this game.');
         if (me.role === 'player' && token.ownerId !== me.id) throw new GameError('You can only move your own token.');
-        const hex = { q: int(msg.q), r: int(msg.r) };
-        if (!onBoard(hex, room.board)) throw new GameError('That is off the map.');
-        const blocker = Object.values(room.tokens).find((t) => t.id !== token.id && t.q === hex.q && t.r === hex.r);
-        if (blocker) throw new GameError(`${blocker.name} is already there.`);
-        token.q = hex.q;
-        token.r = hex.r;
+        const to = { x: num(msg.x, -1e6, 1e6), y: num(msg.y, -1e6, 1e6) };
+        if (!onBoard(to, room.board)) throw new GameError('That is off the map.');
+        const spot = clampToBoard(to, room.board);
+        const blocker = Object.values(room.tokens).find((t) => t.id !== token.id && dist(t, spot) < MIN_TOKEN_GAP);
+        if (blocker) throw new GameError(`${blocker.name} is in the way.`);
+        token.x = spot.x;
+        token.y = spot.y;
         return this.commit(room);
       }
 
@@ -317,8 +344,8 @@ export class GameRoom extends DurableObject<Env> {
         requireRole(me, 'dm');
         const kind = msg.kind === 'npc' || msg.kind === 'monster' ? msg.kind : 'monster';
         const name = cleanName(msg.name) || (kind === 'npc' ? 'NPC' : 'Monster');
-        const wanted = msg.q !== undefined && msg.r !== undefined ? { q: int(msg.q), r: int(msg.r) } : null;
-        const hex = wanted && onBoard(wanted, room.board) && !occupied(room, wanted) ? wanted : freeHexNear(room, viewHex(room));
+        const wanted = msg.x !== undefined && msg.y !== undefined ? { x: num(msg.x, 0, room.board.w), y: num(msg.y, 0, room.board.h) } : room.view;
+        const hex = freeSpot(room, wanted);
         const token = addToken(room, {
           name,
           kind,
@@ -445,8 +472,8 @@ export class GameRoom extends DurableObject<Env> {
           sizeFt: num(a.sizeFt, 5, 500),
           ...(a.widthFt ? { widthFt: num(a.widthFt, 5, 100) } : {}),
           rangeFt: a.rangeFt === null ? null : num(a.rangeFt, 0, 30000),
-          origin: { q: int(a.origin?.q), r: int(a.origin?.r) },
-          target: { q: int(a.target?.q), r: int(a.target?.r) },
+          origin: { x: num(a.origin?.x, -1e4, 1e4), y: num(a.origin?.y, -1e4, 1e4) },
+          target: { x: num(a.target?.x, -1e4, 1e4), y: num(a.target?.y, -1e4, 1e4) },
           at: Date.now(),
         };
         room.areas = [...room.areas, area].slice(-30);
@@ -784,35 +811,14 @@ function initials(name: string): string {
   return letters.toUpperCase() || '?';
 }
 
-function occupied(room: StoredRoom, hex: { q: number; r: number }) {
-  return Object.values(room.tokens).some((t) => t.q === hex.q && t.r === hex.r);
-}
-
-function viewHex(room: StoredRoom) {
-  const hex = pointToHex(room.view);
-  return onBoard(hex, room.board) ? hex : cellToHex(Math.floor(room.board.cols / 2), Math.floor(room.board.rows / 2));
-}
-
-/** The closest empty hex on the board to `start`. */
-function freeHexNear(room: StoredRoom, start: { q: number; r: number }) {
-  const taken = new Set(Object.values(room.tokens).map(hexKey));
-  for (let range = 0; range < 50; range++) {
-    const candidates = hexesInRange(start, range)
-      .filter((h) => onBoard(h, room.board) && !taken.has(hexKey(h)))
-      .sort((a, b) => {
-        const pa = hexToPoint(a);
-        const pb = hexToPoint(b);
-        const ps = hexToPoint(start);
-        return Math.hypot(pa.x - ps.x, pa.y - ps.y) - Math.hypot(pb.x - ps.x, pb.y - ps.y);
-      });
-    if (candidates.length) return candidates[0];
-  }
-  return start;
+/** The nearest spot to `start` where a token fits. */
+function freeSpot(room: StoredRoom, start: Point, exceptId?: string) {
+  return freeSpotNear(start, Object.values(room.tokens).filter((t) => t.id !== exceptId), room.board);
 }
 
 function addToken(
   room: StoredRoom,
-  t: Pick<Token, 'name' | 'kind' | 'color' | 'ownerId' | 'q' | 'r'>,
+  t: Pick<Token, 'name' | 'kind' | 'color' | 'ownerId' | 'x' | 'y'>,
 ): Token {
   const id = `t${room.nextTokenId++}`;
   const token: Token = { id, label: initials(t.name), speedFt: 30, ...t };
@@ -828,7 +834,7 @@ function ensurePlayerToken(room: StoredRoom, member: StoredMember) {
     kind: 'player',
     color: member.color,
     ownerId: member.id,
-    ...freeHexNear(room, viewHex(room)),
+    ...freeSpot(room, room.view),
   });
   if (character) Object.assign(token, { characterId: character.id, speedFt: character.summary.speedFt });
 }
@@ -976,8 +982,8 @@ function cleanKey(value: unknown): string {
 function parseExport(data: unknown): CampaignExport {
   const d = data as CampaignExport;
   const validWorld = (w: World) =>
-    w && typeof w === 'object' && w.board && Number.isInteger(w.board.cols) && Number.isInteger(w.board.rows) &&
-    w.board.cols > 0 && w.board.cols <= 500 && w.board.rows > 0 && w.board.rows <= 500 &&
+    w && typeof w === 'object' && migrateWorld(w) && w.board && Number.isFinite(w.board.w) && Number.isFinite(w.board.h) &&
+    w.board.w > 0 && w.board.w <= 2000 && w.board.h > 0 && w.board.h <= 2000 &&
     w.tokens && typeof w.tokens === 'object' && w.view && Number.isFinite(w.view.x) && Number.isFinite(w.view.y) &&
     Number.isInteger(w.nextTokenId);
   if (!d || d.format !== 'dnd-campaign' || d.version !== 1 || !validWorld(d.world)) {

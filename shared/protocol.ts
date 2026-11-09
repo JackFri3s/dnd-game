@@ -38,7 +38,7 @@ export type Phase = 'lobby' | 'playing';
 /** How the Main Screen is drawn at real-world size. Set by the DM during calibration. */
 export interface TableSettings {
   pxPerMm: number; // screen pixels (CSS) per millimetre on the Main Screen
-  hexMm: number; // width of one hex on the table, in mm (1 inch = 25.4)
+  hexMm: number; // how long 5 feet is on the table, in mm (1 inch = 25.4; the name is from the old hex grid)
   calibrated: boolean;
   calibrating: boolean; // the Main Screen is showing the calibration card right now
   viewport: { w: number; h: number } | null; // Main Screen size in CSS pixels
@@ -48,8 +48,8 @@ export type TokenKind = 'player' | 'npc' | 'monster';
 
 export interface Token {
   id: string;
-  q: number;
-  r: number;
+  x: number; // map units (1 unit = 5 ft)
+  y: number;
   name: string;
   label: string; // 1-2 letters shown on the token
   color: string;
@@ -78,14 +78,14 @@ export interface Area {
   sizeFt: number;
   widthFt?: number;
   rangeFt: number | null;
-  origin: { q: number; r: number };
-  target: { q: number; r: number };
+  origin: { x: number; y: number };
+  target: { x: number; y: number };
   at: number;
 }
 
 /** The part of a game that belongs to the campaign and is saved with it. */
 export interface World {
-  board: { cols: number; rows: number };
+  board: { w: number; h: number }; // map units (1 unit = 5 ft)
   tokens: Record<string, Token>;
   view: { x: number; y: number };
   highlight: Highlight | null;
@@ -133,9 +133,9 @@ export interface RoomState {
   /** The campaign loaded in this game (needed before the DM can start). */
   campaign: { name: string } | null;
   table: TableSettings;
-  /** Centre of what the Main Screen shows, in map units (see shared/hex.ts). */
+  /** Centre of what the Main Screen shows, in map units (see shared/geometry.ts). */
   view: { x: number; y: number };
-  board: { cols: number; rows: number };
+  board: { w: number; h: number };
   tokens: Token[];
   highlight: Highlight | null;
   characters: Character[];
@@ -184,9 +184,9 @@ export interface Requests {
   'table:viewport': { args: { w: number; h: number }; result: null };
   // DM: move what the Main Screen shows
   'view:set': { args: { x: number; y: number }; result: null };
-  'token:move': { args: { tokenId: string; q: number; r: number }; result: null };
+  'token:move': { args: { tokenId: string; x: number; y: number }; result: null };
   // DM: add or remove NPC/monster tokens
-  'token:add': { args: { name: string; color: string; kind: TokenKind; q?: number; r?: number }; result: { tokenId: string } };
+  'token:add': { args: { name: string; color: string; kind: TokenKind; x?: number; y?: number }; result: { tokenId: string } };
   'token:remove': { args: { tokenId: string }; result: null };
   'highlight:set': { args: { highlight: Highlight | null }; result: null };
   // DM: hand a player token to another player (e.g. they use a different phone this time)

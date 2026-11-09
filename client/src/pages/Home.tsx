@@ -14,7 +14,7 @@ export function Home() {
         </a>
         <a className="menu-item" href="/settings">
           <strong>Settings</strong>
-          <span>Distances (hexes, feet, metres) and appearance.</span>
+          <span>Distances (feet or metres) and appearance.</span>
         </a>
       </nav>
       <p className="hint credits">

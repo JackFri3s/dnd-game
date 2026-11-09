@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { Member, RoomState } from '../../../shared/protocol.ts';
-import { hexToPoint } from '../../../shared/hex.ts';
 import type { GameStore } from '../game.ts';
-import { HexBoard, type Camera } from '../components/HexBoard.tsx';
+import { nextPanelSide, usePanelSide } from '../settings.ts';
+import { SIDE_ICON } from '../seats.ts';
+import { MapBoard, type Camera } from '../components/MapBoard.tsx';
 import { ActionPanel, AimBar, useAim } from '../components/Actions.tsx';
 import { useRules } from '../rules/index.ts';
 import { CharacterScreen } from '../characters/CharacterScreen.tsx';
@@ -21,10 +22,11 @@ export function PlayerGame({
 }) {
   const myToken = state.tokens.find((t) => t.ownerId === me.id) ?? null;
   const [camera, setCamera] = useState<Camera>(() => {
-    const at = myToken ? hexToPoint(myToken) : state.view;
+    const at = myToken ? { x: myToken.x, y: myToken.y } : state.view;
     return { ...at, scale: 56 };
   });
   const [menu, setMenu] = useState(false);
+  const side = usePanelSide();
   const [showCharacter, setShowCharacter] = useState(false);
   const myCharacter = state.characters.find((c) => c.ownerId === me.id) ?? null;
   const rules = useRules();
@@ -35,15 +37,18 @@ export function PlayerGame({
   const dm = state.members.find((m) => m.role === 'dm');
 
   return (
-    <div className="game-layout" data-testid="player-game">
+    <div className={`game-layout panel-${side}`} data-testid="player-game">
       <header className="game-bar">
         <span className="badge-dot big" style={{ background: me.color }} />
         <strong className="grow">{myCharacter?.name ?? me.name}</strong>
         <button className="button small" onClick={() => setShowCharacter(true)} data-testid="open-character">
           {myCharacter ? 'Character' : 'Create character'}
         </button>
-        <button className="button small" onClick={() => myToken && setCamera({ ...camera, ...hexToPoint(myToken) })}>
+        <button className="button small" onClick={() => myToken && setCamera({ ...camera, ...{ x: myToken.x, y: myToken.y } })}>
           Find me
+        </button>
+        <button className="button small" onClick={() => nextPanelSide(side)} aria-label="Move the controls" title="Move the controls to another side">
+          {SIDE_ICON[side]}
         </button>
         <button className="button small" onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu">☰</button>
       </header>
@@ -58,15 +63,16 @@ export function PlayerGame({
         </div>
       )}
       {showCharacter && <CharacterScreen store={store} character={myCharacter} editable onClose={() => setShowCharacter(false)} />}
+      <div className="game-body">
       <div className="game-board">
-        <HexBoard
+        <MapBoard
           state={state}
           camera={camera}
           onCameraChange={setCamera}
           canDrag={(t) => t.ownerId === me.id}
-          onMoveToken={(token, hex) => run(store.request('token:move', { tokenId: token.id, ...hex }))}
+          onMoveToken={(token, to) => run(store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }))}
           selectedTokenId={myToken?.id}
-          onTapHex={aimState.aim ? aimState.tapHex : undefined}
+          onTapMap={aimState.aim ? aimState.tapMap : undefined}
           areaPreview={aimState.preview}
         />
       </div>
@@ -93,6 +99,7 @@ export function PlayerGame({
           <p className="hint">Your token will appear when the Dungeon Master places it.</p>
         )}
       </footer>
+      </div>
     </div>
   );
 }

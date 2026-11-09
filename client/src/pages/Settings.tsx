@@ -1,13 +1,19 @@
-import { useSettings, updateSettings, type DistanceUnit, type Style, type Theme } from '../settings.ts';
+import { useSettings, updateSettings, type DistanceUnit, type PanelSide, type Style, type Theme } from '../settings.ts';
 
 const UNITS: { id: DistanceUnit; label: string; hint: string }[] = [
-  { id: 'hex', label: 'Hexes', hint: '1 hex = 5 ft' },
   { id: 'ft', label: 'Feet', hint: 'As in the rule books' },
-  { id: 'm', label: 'Metres', hint: '1 hex = 1.5 m' },
+  { id: 'm', label: 'Metres', hint: '5 ft = 1.5 m' },
 ];
 const STYLES: { id: Style; label: string; hint: string }[] = [
   { id: 'minimal', label: 'Minimal', hint: 'Clean black, white and grey' },
   { id: 'parchment', label: 'Parchment', hint: 'Fantasy, aged paper and ink' },
+];
+const PANELS: { id: PanelSide; label: string }[] = [
+  { id: 'auto', label: 'Automatic' },
+  { id: 'bottom', label: 'Bottom' },
+  { id: 'right', label: 'Right' },
+  { id: 'top', label: 'Top' },
+  { id: 'left', label: 'Left' },
 ];
 const THEMES: { id: Theme; label: string }[] = [
   { id: 'auto', label: 'Automatic' },
@@ -68,6 +74,17 @@ export function SettingsPage() {
               onClick={() => updateSettings({ theme: t.id })}
             >
               {t.label}
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="card">
+        <h2>Controls during play</h2>
+        <p className="hint">Where the buttons sit around the map. Automatic: at the side when the screen is wide, at the bottom when it's tall. You can also move them during play with the button next to the menu.</p>
+        <div className="segmented" role="radiogroup" aria-label="Controls position">
+          {PANELS.map((p) => (
+            <button key={p.id} role="radio" aria-checked={settings.panel === p.id} className={settings.panel === p.id ? 'on' : ''} onClick={() => updateSettings({ panel: p.id })}>
+              {p.label}
             </button>
           ))}
         </div>

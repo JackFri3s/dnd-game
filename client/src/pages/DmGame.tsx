@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { Member, RoomState, TokenKind } from '../../../shared/protocol.ts';
 import type { GameStore } from '../game.ts';
-import { HexBoard, type Camera } from '../components/HexBoard.tsx';
+import { nextPanelSide, usePanelSide } from '../settings.ts';
+import { SIDE_ICON } from '../seats.ts';
+import { MapBoard, type Camera } from '../components/MapBoard.tsx';
 import { CalibrationControls } from '../components/CalibrationControls.tsx';
 import { CampaignPanel } from '../components/CampaignPanel.tsx';
 import { ActionPanel, AimBar, useAim } from '../components/Actions.tsx';
@@ -26,6 +28,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>('add');
   const [menu, setMenu] = useState(false);
+  const side = usePanelSide();
   const [error, setError] = useState<string | null>(null);
   const run = (p: Promise<unknown>) => p.then(() => setError(null), (e: Error) => setError(e.message));
 
@@ -43,12 +46,15 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   }
 
   return (
-    <div className="game-layout" data-testid="dm-game">
+    <div className={`game-layout panel-${side}`} data-testid="dm-game">
       <header className="game-bar">
         <strong className="grow">{state.campaign?.name ?? 'Dungeon Master'}</strong>
         <span className="hint">{state.code}</span>
         <span className={`dot ${table?.connected ? 'on' : 'off'}`} title={`Main Screen ${table?.connected ? 'connected' : 'offline'}`} />
         <button className="button small" onClick={() => setCamera({ ...camera, ...state.view })}>Find Main Screen</button>
+        <button className="button small" onClick={() => nextPanelSide(side)} aria-label="Move the controls" title="Move the controls to another side">
+          {SIDE_ICON[side]}
+        </button>
         <button className="button small" onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu">☰</button>
       </header>
       {menu && (
@@ -60,20 +66,21 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
           <button className="text-button" onClick={() => store.leave()}>Leave game</button>
         </div>
       )}
+      <div className="game-body">
       <div className="game-board">
-        <HexBoard
+        <MapBoard
           state={state}
           camera={camera}
           onCameraChange={setCamera}
           canDrag={() => true}
-          onMoveToken={(token, hex) => run(store.request('token:move', { tokenId: token.id, ...hex }))}
+          onMoveToken={(token, to) => run(store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }))}
           selectedTokenId={selectedId}
           onSelectToken={(t) => {
             setSelectedId(t?.id ?? null);
             if (t) setPanel('token');
           }}
           tableFrame={{ onMove: (c) => run(store.request('view:set', c)) }}
-          onTapHex={aimState.aim ? aimState.tapHex : undefined}
+          onTapMap={aimState.aim ? aimState.tapMap : undefined}
           areaPreview={aimState.preview}
         />
       </div>
@@ -106,6 +113,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
                   rules={rules}
                   aimState={aimState}
                   canRemoveArea={() => true}
+                  dmTools
                 />
               )}
               {selected.kind === 'player' && (
@@ -168,6 +176,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
           </ul>
         )}
       </footer>
+      </div>
     </div>
   );
 }

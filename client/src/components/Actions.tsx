@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import type { Area, RoomState, Token } from '../../../shared/protocol.ts';
-import { describeArea, fromCaster, type AreaSpec } from '../../../shared/areas.ts';
-import { FEET_PER_HEX, hexDistance, type Hex } from '../../../shared/hex.ts';
+import { describeArea, dist, fromCaster, inRange, type AreaSpec, type Point } from '../../../shared/geometry.ts';
 import { withSummary, type AreaShape, type Character, type RulesData } from '../../../shared/rules.ts';
 import type { GameStore } from '../game.ts';
 import { formatDistance, useSettings } from '../settings.ts';
-import type { AreaPreview } from './HexBoard.tsx';
+import type { AreaPreview } from './MapBoard.tsx';
 
 /** A spell or effect being aimed on the map. */
 export interface Aim {
@@ -14,7 +13,7 @@ export interface Aim {
   rangeFt: number | null;
   tokenId: string;
   spellLevel: number; // 0 = cantrip / no slot
-  target: Hex | null;
+  target: Point | null;
 }
 
 /** Everything a page needs to aim and cast an area. */
@@ -32,21 +31,22 @@ export function useAim(store: GameStore, state: RoomState) {
           sizeFt: aim.spec.sizeFt,
           widthFt: aim.spec.widthFt,
           rangeFt: aim.rangeFt,
-          origin: { q: token.q, r: token.r },
+          origin: { x: token.x, y: token.y },
           target: aim.target,
         }
       : null;
 
-  function tapHex(hex: Hex) {
+  function tapMap(at: Point) {
     if (!aim || !token) return;
     const self = fromCaster(aim.spec, aim.rangeFt);
-    if (!self && aim.rangeFt !== null && hexDistance(token, hex) * FEET_PER_HEX > aim.rangeFt) {
+    // The point of origin must be within range (0 ft = touching the caster's space).
+    if (!self && aim.rangeFt !== null && !inRange(token, at, aim.rangeFt) && dist(token, at) > 0.5) {
       setError('That is out of range.');
       return;
     }
-    if (self && hexDistance(token, hex) === 0) return;
+    if (self && dist(token, at) < 0.2) return;
     setError(null);
-    setAim({ ...aim, target: hex });
+    setAim({ ...aim, target: at });
   }
 
   function start(next: Omit<Aim, 'target'>) {
@@ -84,7 +84,7 @@ export function useAim(store: GameStore, state: RoomState) {
     }
   }
 
-  return { aim, preview, error, tapHex, start, cancel, cast };
+  return { aim, preview, error, tapMap, start, cancel, cast };
 }
 
 /** The bar shown while aiming: what is being cast, and Cast / Cancel. */
@@ -113,10 +113,10 @@ export function AimBar({
               ? freeSlot >= 0
                 ? `Uses a level ${freeSlot + 1} spell slot.`
                 : 'No spell slots left (cast anyway?).'
-              : 'Tap another hex to move it.'
+              : 'Tap somewhere else to move it.'
             : self
-              ? 'Tap a hex to point it.'
-              : `Tap a hex within ${aim.rangeFt === null ? 'range' : formatDistance(aim.rangeFt, unit)} to place it.`}
+              ? 'Tap the map to point it.'
+              : `Tap a spot within ${aim.rangeFt === null ? 'range' : formatDistance(aim.rangeFt, unit)} to place it.`}
         </div>
         {error && <div className="error">{error}</div>}
       </div>
@@ -149,6 +149,7 @@ export function ActionPanel({
   rules,
   aimState,
   canRemoveArea,
+  dmTools,
 }: {
   store: GameStore;
   state: RoomState;
@@ -157,6 +158,8 @@ export function ActionPanel({
   rules: RulesData | null;
   aimState: ReturnType<typeof useAim>;
   canRemoveArea: (a: Area) => boolean;
+  /** The DM always gets the general ranges and area shapes, for any token. */
+  dmTools?: boolean;
 }) {
   const { unit } = useSettings();
   const [error, setError] = useState<string | null>(null);
@@ -246,7 +249,7 @@ export function ActionPanel({
         </>
       )}
 
-      {!character && (
+      {(!character || dmTools) && (
         <>
           <div className="label">Ranges</div>
           <div className="chip-row">

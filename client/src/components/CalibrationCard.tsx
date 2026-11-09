@@ -1,20 +1,14 @@
 import { CARD_MM, type TableSettings } from '../../../shared/protocol.ts';
-import { hexCorners, hexToPoint } from '../../../shared/hex.ts';
 import { formatLength, useSettings } from '../settings.ts';
 
 /**
  * Shown on the Main Screen while the DM calibrates it: a bank-card outline and a
- * few test hexes drawn at the size the screen currently thinks is real.
+ * few test spaces drawn at the size the screen currently thinks is real.
  */
 export function CalibrationCard({ table }: { table: TableSettings }) {
   const { unit } = useSettings();
   const card = { w: CARD_MM.w * table.pxPerMm, h: CARD_MM.h * table.pxPerMm };
-  const hexPx = table.hexMm * table.pxPerMm;
-  const testHexes = [
-    { q: 0, r: 0 },
-    { q: 1, r: 0 },
-    { q: 2, r: 0 },
-  ];
+  const unitPx = table.hexMm * table.pxPerMm; // one 5-foot space
   const ruler = 100 * table.pxPerMm; // 10 cm
 
   return (
@@ -28,23 +22,13 @@ export function CalibrationCard({ table }: { table: TableSettings }) {
         <span>Bank card</span>
       </div>
       <div className="calib-row">
-        <svg width={hexPx * 3 + 4} height={hexPx * 1.2} aria-label="Test hexes">
-          <g transform={`translate(${hexPx / 2 + 2} ${hexPx * 0.6}) scale(${hexPx})`}>
-            {testHexes.map((h) => {
-              const c = hexCorners(hexToPoint(h));
-              return (
-                <polygon
-                  key={h.q}
-                  points={c.map((p) => `${p.x},${p.y}`).join(' ')}
-                  className="calib-hex"
-                  strokeWidth={2 / hexPx}
-                />
-              );
-            })}
-          </g>
+        <svg width={unitPx * 3.4} height={unitPx * 1.2} aria-label="Test spaces">
+          {[0, 1, 2].map((i) => (
+            <circle key={i} className="calib-hex" cx={unitPx * (0.6 + i * 1.1)} cy={unitPx * 0.6} r={unitPx / 2 - 1} strokeWidth={2} />
+          ))}
         </svg>
         <p className="hint">
-          Each hex is {formatLength(table.hexMm, unit)} wide. Put a miniature on one to check it fits.
+          Each circle is one 5-foot space: {formatLength(table.hexMm, unit)} across. Put a miniature on one to check it fits.
         </p>
       </div>
       <div className="calib-ruler" style={{ width: ruler }}>

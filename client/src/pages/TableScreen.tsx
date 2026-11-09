@@ -3,8 +3,9 @@ import QRCode from 'qrcode';
 import { SEATS, type Member, type RoomState } from '../../../shared/protocol.ts';
 import { GameStore, useGame } from '../game.ts';
 import { SIDE_ROTATION } from '../seats.ts';
-import { HexBoard } from '../components/HexBoard.tsx';
+import { MapBoard } from '../components/MapBoard.tsx';
 import { read, write } from '../socket.ts';
+import { useSettings } from '../settings.ts';
 import { CalibrationCard } from '../components/CalibrationCard.tsx';
 import { RollToasts } from '../components/RollToasts.tsx';
 
@@ -192,11 +193,11 @@ function TableBoard({ state, code, connected }: { state: RoomState; code: string
   const scale = state.table.pxPerMm * state.table.hexMm;
   return (
     <main className="table-screen playing">
-      <HexBoard
+      <MapBoard
         state={state}
         camera={{ x: state.view.x, y: state.view.y, scale }}
         canDrag={() => true}
-        onMoveToken={(token, hex) => store.request('token:move', { tokenId: token.id, ...hex })}
+        onMoveToken={(token, to) => store.request('token:move', { tokenId: token.id, x: to.x, y: to.y })}
         faceSeats
       />
       <RollToasts state={state} />
@@ -206,6 +207,7 @@ function TableBoard({ state, code, connected }: { state: RoomState; code: string
           Join: <strong>{window.location.host}/join</strong> · code <strong>{code}</strong>
         </span>
         {state.campaign && <span>{state.campaign.name}</span>}
+        <ScaleBar pxPer5ft={scale} />
         {!state.table.calibrated && <span className="hint">Not calibrated: the DM can calibrate for miniatures.</span>}
       </div>
     </main>
@@ -218,4 +220,15 @@ function state_campaign(state: RoomState | null) {
       Campaign: <strong>{state.campaign.name}</strong>
     </p>
   ) : null;
+}
+
+/** A small ruler on the Main Screen: how long 10 feet is on the table. */
+function ScaleBar({ pxPer5ft }: { pxPer5ft: number }) {
+  const { unit } = useSettings();
+  return (
+    <span className="scale-bar">
+      <span className="scale-line" style={{ width: pxPer5ft * 2 }} />
+      {unit === 'm' ? '3 m' : '10 ft'}
+    </span>
+  );
 }

@@ -14,7 +14,7 @@ Steps 1–5 of the build order are done: **connecting the screens**, **the hex b
 
 - Open `/table` on the Main Screen: it shows a game code and QR code. It needs no touch screen.
 - Players scan the QR code (or open `/join`), choose **Player** or **Dungeon Master**, enter their name and pick their seat.
-- The **DM** picks or creates a **campaign**, then starts it. The DM calibrates the Main Screen with a bank card so hexes fit miniatures; each Main Screen remembers its calibration.
+- The **DM** picks or creates a **campaign**, then starts it. The DM calibrates the Main Screen with a bank card so distances fit miniatures (5 ft = 1 inch); each Main Screen remembers its calibration.
 - The Main Screen shows the hex map at true size; the DM chooses which part it shows.
 - Players drag their own token; the DM and the Main Screen (if it has touch) can move any token. The DM adds monster and NPC tokens.
 - Movement and range areas can be shown around a token on every screen.
@@ -27,7 +27,8 @@ Steps 1–5 of the build order are done: **connecting the screens**, **the hex b
 - **Roll me a character**: pick a class, species and background (or let chance decide), roll the dice, and keep the ready level-1 character or roll again.
 
 
-- **Movement and ranges** (step 5): the movement area follows the paths a creature can walk (enemies block the way, allies can be passed); dragging a token shows its path and distance. Each weapon shows its reach or normal/long range, each spell its range, and spells with an area (sphere, cone, line, cube, cylinder, emanation; 73 spells) can be aimed on the map and cast, using a spell slot. Areas stay on every screen until removed.
+- **Gridless map with true ranges** (step 5): tokens move freely; dragging shows the distance in feet or metres. Each weapon shows its reach or normal/long range, each spell its range (measured from the edge of the creature's space), and spells with an area (sphere, cone, line, cube, cylinder, emanation; 73 spells) can be aimed on the map and cast as true shapes, using a spell slot. Areas stay on every screen until removed.
+- **Controls position**: during play the controls can sit at the bottom, top, left or right of the map (automatic: at the side on wide screens).
 - **Two looks** (Settings): **Minimal** (greyscale) or **Parchment** (the fantasy paper-and-ink look), each in light or dark. In both, movement is green, attacks are red and spells are purple.
 
 ## Run it on your computer

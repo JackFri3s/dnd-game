@@ -12,3 +12,6 @@ export const SIDE_ROTATION: Record<Side, number> = {
 export function seatNumber(seat: string | null) {
   return SEATS.findIndex((s) => s.id === seat) + 1;
 }
+
+/** Arrows showing where the controls panel is (and the button moves it on). */
+export const SIDE_ICON = { bottom: '⇄', right: '⇄', top: '⇄', left: '⇄' } as const;

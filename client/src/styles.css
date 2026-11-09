@@ -232,7 +232,15 @@ p.hint { margin: 2px 0 8px; }
 .game-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: var(--bg); }
 .game-bar .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .game-menu { display: flex; flex-direction: column; align-items: flex-start; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.game-board { flex: 1; min-height: 0; position: relative; }
+.game-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.panel-top .game-body { flex-direction: column-reverse; }
+.panel-right .game-body { flex-direction: row; }
+.panel-left .game-body { flex-direction: row-reverse; }
+.game-board { flex: 1; min-height: 0; min-width: 0; position: relative; }
+.panel-top .game-controls { border-top: 0; border-bottom: 1px solid var(--line); }
+.panel-right .game-controls, .panel-left .game-controls { width: min(380px, 42vw); max-height: none; border-top: 0; overflow-y: auto; }
+.panel-right .game-controls { border-left: 1px solid var(--line); }
+.panel-left .game-controls { border-right: 1px solid var(--line); }
 .game-controls { padding: 10px 12px; padding-bottom: max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); max-height: 48dvh; overflow-y: auto; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { border: 1px solid var(--line-strong); background: var(--bg); border-radius: 999px; padding: 6px 12px; font-size: 0.85rem; }
@@ -266,19 +274,22 @@ p.hint { margin: 2px 0 8px; }
 .calib-adjust input[type='range'] { flex: 1; margin: 0; padding: 0; border: 0; accent-color: var(--text); }
 
 /* ---------- Hex board ---------- */
-.hex-board { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; background: var(--board-outside); }
+.map-board { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; background: var(--board-outside); }
 .board-bg { fill: var(--board); }
-.grid { fill: none; stroke: var(--grid); stroke-opacity: 0.7; }
 .highlight { stroke: none; }
 .highlight.move { fill: var(--move); fill-opacity: 0.2; stroke: var(--move); stroke-opacity: 0.25; }
 .highlight.range { fill: var(--range); fill-opacity: 0.16; stroke: var(--range); stroke-opacity: 0.25; }
 .highlight.spell { fill: var(--spell); fill-opacity: 0.1; stroke: var(--spell); stroke-opacity: 0.2; }
-.highlight.far { fill-opacity: 0.08; stroke: none; }
+.highlight.far { fill-opacity: 0.07; stroke-dasharray: 0.2 0.15; }
 .area { fill: var(--spell); fill-opacity: 0.38; stroke: var(--spell); }
 .area.preview { fill-opacity: 0.25; stroke-dasharray: 0.12 0.08; }
 .area-label { fill: var(--spell); font-family: Inter, system-ui, sans-serif; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: var(--board); stroke-width: 0.06; pointer-events: none; }
-.move-path { fill: var(--path); fill-opacity: 0.55; stroke: none; pointer-events: none; }
-.move-path.over { fill: var(--range); }
+.move-line { stroke: var(--path); stroke-linecap: round; stroke-dasharray: 0.15 0.12; pointer-events: none; }
+.move-line.over { stroke: var(--range); }
+.map-board.aiming { cursor: crosshair; }
+.board-bg { stroke: var(--line-strong); stroke-width: 0.03; }
+.scale-bar { display: inline-flex; align-items: center; gap: 6px; }
+.scale-line { display: inline-block; height: 6px; border: 2px solid var(--text); border-top: 0; }
 .distance-tag { fill: var(--path); }
 .distance-tag.over { fill: var(--range); }
 .distance-text { fill: #fff; font-family: Inter, system-ui, sans-serif; font-weight: 600; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
@@ -543,3 +554,4 @@ body:has(.overlay) { overflow: hidden; }
 [data-style='parchment'] .segmented button.on { background: var(--primary); color: var(--on-primary); }
 [data-style='parchment'] .pill.prof { border-color: var(--primary); }
 [data-style='parchment'] .token-ring { fill: var(--board); }
+.map-board.aiming .table-frame, .map-board.aiming .table-frame * { pointer-events: none; }
