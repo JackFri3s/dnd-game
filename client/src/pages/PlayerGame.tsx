@@ -29,7 +29,7 @@ export function PlayerGame({
   const side = usePanelSide();
   const [showCharacter, setShowCharacter] = useState(false);
   const myCharacter = state.characters.find((c) => c.ownerId === me.id) ?? null;
-  const rules = useRules();
+  const rules = useRules(state.homebrew);
   const aimState = useAim(store, state);
   const [error, setError] = useState<string | null>(null);
   const run = (p: Promise<unknown>) => p.then(() => setError(null), (e: Error) => setError(e.message));

@@ -9,6 +9,8 @@ import { CalibrationControls } from '../components/CalibrationControls.tsx';
 import { CampaignPanel } from '../components/CampaignPanel.tsx';
 import { CharacterScreen } from '../characters/CharacterScreen.tsx';
 import { CharacterList } from '../characters/CharacterList.tsx';
+import { HomebrewPanel } from '../characters/HomebrewPanel.tsx';
+import { useRules } from '../rules/index.ts';
 
 type Role = 'player' | 'dm';
 const stores = { player: new GameStore('player'), dm: new GameStore('dm') };
@@ -288,6 +290,8 @@ function DmLobby({
         </div>
       )}
 
+      {state.campaign && <CustomContentCard store={store} state={state} />}
+
       <div className="card">
         <h3>Main Screen size</h3>
         <CalibrationControls store={store} table={state.table} />
@@ -364,4 +368,22 @@ function SeatPicker({
       ))}
     </div>
   );
+}
+
+/** The DM's custom content, folded away until opened (the rules load when it opens). */
+function CustomContentCard({ store, state }: { store: GameStore; state: RoomState }) {
+  const [open, setOpen] = useState(false);
+  const count = state.homebrew.species.length + state.homebrew.classes.length + state.homebrew.spells.length + state.homebrew.items.length;
+  return (
+    <div className="card">
+      <h3>Custom content ({count})</h3>
+      {open ? <CustomContentInner store={store} state={state} /> : <button className="button block" onClick={() => setOpen(true)}>Species, classes, spells and items</button>}
+    </div>
+  );
+}
+
+function CustomContentInner({ store, state }: { store: GameStore; state: RoomState }) {
+  const rules = useRules(state.homebrew);
+  if (!rules) return <p className="hint">Loading the rules…</p>;
+  return <HomebrewPanel store={store} homebrew={state.homebrew} rules={rules} myId="" isDm />;
 }

@@ -106,7 +106,7 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onL
   }
 
   // ---- table of weapons and damaging spells ----
-  const spellRows = [...c.cantrips, ...c.spells, ...d.bonusSpells.map((b) => b.index)]
+  const spellRows = [...new Set([...c.cantrips, ...c.spells, ...d.bonusSpells.map((b) => b.index)])]
     .map((id) => rules.spells.find((s) => s.index === id))
     .filter((s): s is NonNullable<typeof s> => !!s && !!(s.damage || s.attack));
   const armor = d.cls?.proficiencies ?? [];
@@ -485,7 +485,7 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onL
 
                 </div>
               )}
-              {[...c.cantrips, ...c.spells, ...d.bonusSpells.map((b) => b.index)]
+              {[...new Set([...c.cantrips, ...c.spells, ...d.bonusSpells.map((b) => b.index)])]
                 .map((id) => rules.spells.find((x) => x.index === id))
                 .filter((s): s is NonNullable<typeof s> => !!s)
                 .map((s) => (

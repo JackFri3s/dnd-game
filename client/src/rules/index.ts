@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RulesData } from '../../../shared/rules.ts';
+import { mergeHomebrew, type Homebrew } from '../../../shared/homebrew.ts';
 
 // The rules data (~500 KB) is only downloaded when a character screen first needs it.
 let loading: Promise<RulesData> | null = null;
@@ -10,12 +11,13 @@ export function loadRules(): Promise<RulesData> {
   return loading;
 }
 
-export function useRules(): RulesData | null {
+/** The official rules, plus the campaign's custom content when given. */
+export function useRules(homebrew?: Homebrew): RulesData | null {
   const [rules, setRules] = useState(loaded);
   useEffect(() => {
     if (!rules) loadRules().then(setRules);
   }, [rules]);
-  return rules;
+  return useMemo(() => (rules ? mergeHomebrew(rules, homebrew) : null), [rules, homebrew]);
 }
 
 /** Standard languages a character can pick from (the others are rare languages). */

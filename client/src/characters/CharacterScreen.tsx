@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Character } from '../../../shared/rules.ts';
 import type { DiceRoll } from '../../../shared/protocol.ts';
-import type { GameStore } from '../game.ts';
+import { useGame, type GameStore } from '../game.ts';
+import { HomebrewPanel } from './HomebrewPanel.tsx';
 import { useRules } from '../rules/index.ts';
 import { CharacterSheet } from './CharacterSheet.tsx';
 import { CharacterBuilder } from './CharacterBuilder.tsx';
@@ -9,7 +10,7 @@ import { CharacterEditor } from './CharacterEditor.tsx';
 import { QuickRoll } from './QuickRoll.tsx';
 import { LevelUp } from './LevelUp.tsx';
 
-type Mode = 'sheet' | 'choose' | 'builder' | 'editor' | 'quick' | 'levelup';
+type Mode = 'sheet' | 'choose' | 'builder' | 'editor' | 'quick' | 'levelup' | 'homebrew';
 
 /**
  * Everything about one character, as a full-screen panel: create one (guided or
@@ -26,7 +27,8 @@ export function CharacterScreen({
   editable: boolean;
   onClose: () => void;
 }) {
-  const rules = useRules();
+  const game = useGame(store);
+  const rules = useRules(game.state?.homebrew);
   const [mode, setMode] = useState<Mode>(character ? 'sheet' : 'choose');
   const [lastRoll, setLastRoll] = useState<DiceRoll | null>(null);
   // The roll result disappears after a few seconds.
@@ -85,6 +87,17 @@ export function CharacterScreen({
               <strong>Enter an existing character</strong>
               <span className="hint">Already have a character on paper or in another app? Fill it in here.</span>
             </button>
+            <button className="text-button" onClick={() => setMode('homebrew')} data-testid="choose-homebrew">
+              Make custom content first (your own species, class, spell or item)
+            </button>
+          </div>
+        ) : mode === 'homebrew' ? (
+          <div className="stack">
+            <header className="builder-head">
+              <button className="text-button" onClick={() => setMode(character ? 'sheet' : 'choose')}>← Back</button>
+            </header>
+            <h2>Custom content</h2>
+            <HomebrewPanel store={store} homebrew={game.state!.homebrew} rules={rules} myId={game.me?.id ?? ''} isDm={game.me?.role === 'dm'} />
           </div>
         ) : mode === 'levelup' && character ? (
           <LevelUp character={character} rules={rules} rollDice={(label, groups, modifier) => rollDice(label, groups, modifier)} onSave={saveAndShow} onCancel={() => setMode('sheet')} />

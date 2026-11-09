@@ -9,14 +9,16 @@ import { CampaignPanel } from '../components/CampaignPanel.tsx';
 import { ActionPanel, AimBar, useAim } from '../components/Actions.tsx';
 import { useRules } from '../rules/index.ts';
 import { CharacterList } from '../characters/CharacterList.tsx';
+import { HomebrewPanel } from '../characters/HomebrewPanel.tsx';
 import { seatNumber } from '../seats.ts';
 
 const TOKEN_SHADES = ['#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3'];
-type Panel = 'token' | 'add' | 'characters' | 'campaign' | 'screen' | 'players';
+type Panel = 'token' | 'add' | 'characters' | 'custom' | 'campaign' | 'screen' | 'players';
 const PANELS: { id: Panel; label: string }[] = [
   { id: 'token', label: 'Selected' },
   { id: 'add', label: 'Add' },
   { id: 'characters', label: 'Characters' },
+  { id: 'custom', label: 'Custom' },
   { id: 'campaign', label: 'Campaign' },
   { id: 'screen', label: 'Main Screen' },
   { id: 'players', label: 'Players' },
@@ -37,7 +39,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const table = state.members.find((m) => m.role === 'table');
   const owner = selected?.ownerId ? state.members.find((m) => m.id === selected.ownerId) : null;
   const selectedCharacter = selected?.characterId ? (state.characters.find((c) => c.id === selected.characterId) ?? null) : null;
-  const rules = useRules();
+  const rules = useRules(state.homebrew);
   const aimState = useAim(store, state);
 
   function kick(p: Member) {
@@ -150,6 +152,8 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
         {panel === 'add' && <AddToken store={store} onAdded={(id) => setSelectedId(id)} />}
 
         {panel === 'characters' && <CharacterList store={store} state={state} />}
+
+        {panel === 'custom' && (rules ? <HomebrewPanel store={store} homebrew={state.homebrew} rules={rules} myId="" isDm /> : <p className="hint">Loading the rules…</p>)}
 
         {panel === 'campaign' && <CampaignPanel store={store} state={state} />}
 

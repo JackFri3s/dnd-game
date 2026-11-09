@@ -93,7 +93,10 @@ export function CharacterBuilder({ rules, rollDice, onSave, onCancel }: Props) {
 
   // ---- skills ----
   const bgSkills = background?.skills ?? [];
-  const skillChoices = (cls?.skillChoice.from ?? []).filter((s) => !bgSkills.includes(s));
+  // If the background already gives some of the class's skills, the rules let you pick any other skill instead.
+  const classSkills = (cls?.skillChoice.from ?? []).filter((s) => !bgSkills.includes(s));
+  const skillChoices =
+    classSkills.length >= (cls?.skillChoice.choose ?? 0) ? classSkills : rules.skills.map((s) => s.index).filter((s) => !bgSkills.includes(s));
   const skillsNeeded = cls?.skillChoice.choose ?? 0;
 
   // ---- spells ----

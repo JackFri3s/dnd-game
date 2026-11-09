@@ -76,7 +76,9 @@ export function quickCharacter(
 
   const level1 = cls.levels[0];
   const classSpells = rules.spells.filter((s) => s.classes.includes(cls.index));
-  const skills = sample(cls.skillChoice.from.filter((s) => !background.skills.includes(s)), cls.skillChoice.choose);
+  const classSkills = cls.skillChoice.from.filter((s) => !background.skills.includes(s));
+  const pool = classSkills.length >= cls.skillChoice.choose ? classSkills : rules.skills.map((s) => s.index).filter((s) => !background.skills.includes(s));
+  const skills = sample(pool, cls.skillChoice.choose);
   const { items, gold } = expandEquipment(rules, [cls.equipment[0], background.equipment[0]]);
   const hp = Math.max(1, cls.hitDie + mod(abilities.con) + bonusHp({ speciesIndex: species.index, level: 1 }));
 

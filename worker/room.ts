@@ -25,6 +25,7 @@ import {
   type Area,
 } from '../shared/protocol.ts';
 import type { CampaignExport } from './campaign.ts';
+import { checkHomebrew, emptyHomebrew, DAMAGE_TYPES, WEAPON_PROPERTIES, SCHOOLS, type Homebrew, type HomebrewKind } from '../shared/homebrew.ts';
 import { MIN_TOKEN_GAP, clampToBoard, dist, freeSpotNear, fromHex, onBoard, type Point } from '../shared/geometry.ts';
 
 /** A game nobody has connected to for this long is deleted. */
@@ -48,6 +49,7 @@ interface StoredRoom {
   characters: Record<string, Character>;
   rolls: DiceRoll[];
   areas: Area[];
+  homebrew: Homebrew;
 }
 
 const KEY_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -55,7 +57,7 @@ const KEY_LENGTH = 10;
 
 function emptyWorld(): World {
   const board = DEFAULT_BOARD;
-  return { board, tokens: {}, view: { x: board.w / 2, y: board.h / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [] };
+  return { board, tokens: {}, view: { x: board.w / 2, y: board.h / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [], homebrew: emptyHomebrew() };
 }
 
 /**
@@ -94,6 +96,7 @@ function worldOf(room: StoredRoom): World {
     nextTokenId: room.nextTokenId,
     characters: room.characters,
     areas: room.areas,
+    homebrew: room.homebrew,
   };
 }
 
@@ -106,6 +109,7 @@ function applyWorld(room: StoredRoom, world: World) {
   room.nextTokenId = world.nextTokenId;
   room.characters = world.characters ?? {};
   room.areas = world.areas ?? [];
+  room.homebrew = { ...emptyHomebrew(), ...(world.homebrew ?? {}) };
 }
 
 const DEFAULT_BOARD = { w: 40, h: 25 };
@@ -125,6 +129,7 @@ function withDefaults(room: Partial<StoredRoom> & Pick<StoredRoom, 'code' | 'tab
     rolls: [],
     areas: [],
     ...room,
+    homebrew: { ...emptyHomebrew(), ...(room.homebrew ?? {}) },
     board,
     table: {
       pxPerMm: DEFAULT_PX_PER_MM,
@@ -454,6 +459,36 @@ export class GameRoom extends DurableObject<Env> {
         return this.commit(room);
       }
 
+      // ---------- custom content ----------
+
+      case 'homebrew:save': {
+        if (!me || me.role === 'table') throw new GameError('Not allowed.');
+        requireCampaign(room);
+        const kind = msg.kind;
+        if (!['species', 'classes', 'spells', 'items'].includes(kind)) throw new GameError('Unknown kind of content.');
+        const list = room.homebrew[kind] as { id: string; byId: string }[];
+        const existing = list.find((x) => x.id === msg.entry?.id);
+        if (existing && me.role !== 'dm' && existing.byId !== me.id) throw new GameError('Only the Dungeon Master or its maker can change this.');
+        const entry = sanitizeHomebrew(kind, msg.entry);
+        const problem = checkHomebrew(kind, entry);
+        if (problem) throw new GameError(problem);
+        entry.id = existing?.id ?? crypto.randomUUID().slice(0, 8);
+        entry.by = existing ? (existing as unknown as { by: string }).by : me.name;
+        entry.byId = existing?.byId ?? me.id;
+        (room.homebrew[kind] as unknown[]) = existing ? list.map((x) => (x.id === existing.id ? entry : x)) : [...list, entry].slice(-100);
+        await this.commit(room);
+        return { entryId: entry.id as string } satisfies Requests['homebrew:save']['result'];
+      }
+
+      case 'homebrew:delete': {
+        const list = (room.homebrew[msg.kind] ?? []) as { id: string; byId: string }[];
+        const entry = list.find((x) => x.id === msg.entryId);
+        if (!entry) return null;
+        if (me?.role !== 'dm' && entry.byId !== me?.id) throw new GameError('Only the Dungeon Master or its maker can delete this.');
+        (room.homebrew[msg.kind] as unknown[]) = list.filter((x) => x.id !== entry.id);
+        return this.commit(room);
+      }
+
       // ---------- areas ----------
 
       case 'area:add': {
@@ -741,6 +776,7 @@ export class GameRoom extends DurableObject<Env> {
       characters: Object.values(room.characters),
       rolls: room.rolls,
       areas: room.areas,
+      homebrew: room.homebrew,
     };
   }
 
@@ -1039,4 +1075,88 @@ function sanitizeChoices(raw: unknown): Character['choices'] {
     }));
   }
   return out;
+}
+
+/** Keeps only known fields with the right types (the rule limits are checked by checkHomebrew). */
+function sanitizeHomebrew(kind: HomebrewKind, raw: unknown): Record<string, unknown> {
+  const e = (raw && typeof raw === 'object' ? raw : {}) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (JSON.stringify(e).length > 30_000) throw new GameError('This is too large to save.');
+  const str = (v: unknown, max = 60) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const n = (v: unknown, min: number, max: number, d = min) => (Number.isFinite(Number(v)) ? Math.min(max, Math.max(min, Math.round(Number(v)))) : d);
+  const oneOf = <T extends string>(v: unknown, list: readonly T[], d: T): T => (list.includes(v as T) ? (v as T) : d);
+  const ability = (v: unknown) => oneOf(v, ABILITY_KEYS, 'str');
+  const texts = (v: unknown, max: number) =>
+    (Array.isArray(v) ? v : []).slice(0, max).map((t) => ({ name: str(t?.name, 80) || 'Trait', description: str(t?.description, 3000) }));
+  const base = { id: str(e.id, 40), name: str(e.name), by: '', byId: '' };
+  if (kind === 'species') {
+    return {
+      ...base,
+      size: oneOf(e.size, ['Small', 'Medium'] as const, 'Medium'),
+      speed: n(e.speed, 0, 100, 30),
+      darkvision: n(e.darkvision, 0, 200, 0),
+      resistances: (Array.isArray(e.resistances) ? e.resistances : []).filter((r: unknown) => DAMAGE_TYPES.includes(r as string)).slice(0, 5),
+      traits: texts(e.traits, 10),
+    };
+  }
+  if (kind === 'classes') {
+    return {
+      ...base,
+      hitDie: n(e.hitDie, 4, 20, 8),
+      primary: ability(e.primary),
+      saves: (Array.isArray(e.saves) ? e.saves : []).slice(0, 2).map(ability),
+      skillCount: n(e.skillCount, 0, 10, 2),
+      skills: (Array.isArray(e.skills) ? e.skills : []).filter((s: unknown) => typeof s === 'string').slice(0, 18).map((s: string) => s.slice(0, 40)),
+      armor: (Array.isArray(e.armor) ? e.armor : []).filter((a: unknown) => ['Light', 'Medium', 'Heavy', 'Shields'].includes(a as string)),
+      weapons: (Array.isArray(e.weapons) ? e.weapons : []).filter((w: unknown) => ['Simple', 'Martial'].includes(w as string)),
+      caster: oneOf(e.caster, ['none', 'full', 'half', 'pact'] as const, 'none'),
+      spellAbility: ability(e.spellAbility ?? 'int'),
+      spellList: str(e.spellList, 40) || 'wizard',
+      features: (Array.isArray(e.features) ? e.features : []).slice(0, 60).map((f: { level?: unknown; name?: unknown; description?: unknown }) => ({
+        level: n(f?.level, 1, 20, 1),
+        name: str(f?.name, 80) || 'Feature',
+        description: str(f?.description, 3000),
+      })),
+      subclasses: (Array.isArray(e.subclasses) ? e.subclasses : []).filter((s: unknown) => typeof s === 'string').slice(0, 6).map((s: string) => s.slice(0, 60)),
+    };
+  }
+  if (kind === 'spells') {
+    const shapes = ['sphere', 'cone', 'cube', 'cylinder', 'emanation', 'line'] as const;
+    return {
+      ...base,
+      level: n(e.level, 0, 9, 0),
+      school: oneOf(e.school, SCHOOLS, 'Evocation'),
+      classes: (Array.isArray(e.classes) ? e.classes : []).filter((c: unknown) => typeof c === 'string').slice(0, 20).map((c: string) => c.slice(0, 40)),
+      castingTime: str(e.castingTime, 40) || 'Action',
+      rangeFt: n(e.rangeFt, 0, 10_000, 60),
+      duration: str(e.duration, 40) || 'Instantaneous',
+      concentration: !!e.concentration,
+      ritual: !!e.ritual,
+      damage: str(e.damage, 30),
+      save: e.save ? ability(e.save) : '',
+      attack: oneOf(e.attack, ['', 'melee', 'ranged'] as const, ''),
+      area: e.area ? { shape: oneOf(e.area.shape, shapes, 'sphere'), size: n(e.area.size, 0, 1000, 20) } : null,
+      description: str(e.description, 4000),
+    };
+  }
+  const kinds = ['weapon', 'armor', 'shield', 'gear'] as const;
+  const itemKind = oneOf(e.kind, kinds, 'gear');
+  return {
+    ...base,
+    kind: itemKind,
+    description: str(e.description, 2000),
+    ...(itemKind === 'weapon'
+      ? {
+          weapon: {
+            category: oneOf(e.weapon?.category, ['simple', 'martial'] as const, 'simple'),
+            damage: str(e.weapon?.damage, 10),
+            type: oneOf(e.weapon?.type, DAMAGE_TYPES, 'Slashing'),
+            properties: (Array.isArray(e.weapon?.properties) ? e.weapon.properties : []).filter((p: unknown) => WEAPON_PROPERTIES.includes(p as string)),
+            ranged: !!e.weapon?.ranged,
+            ...(e.weapon?.normal ? { normal: n(e.weapon.normal, 5, 600, 80) } : {}),
+            ...(e.weapon?.long ? { long: n(e.weapon.long, 5, 1000, 320) } : {}),
+          },
+        }
+      : {}),
+    ...(itemKind === 'armor' ? { armor: { category: oneOf(e.armor?.category, ['light', 'medium', 'heavy'] as const, 'light'), base: n(e.armor?.base, 0, 30, 11) } } : {}),
+  };
 }

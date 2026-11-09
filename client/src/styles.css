@@ -560,3 +560,7 @@ body:has(.overlay) { overflow: hidden; }
 .pool { min-width: 52px; text-align: center; font-weight: 600; }
 .rests { justify-content: flex-end; margin-top: 10px; }
 .head-buttons { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.homebrew .segmented { flex-wrap: wrap; }
+.text-entry { padding: 6px 0; border-bottom: 1px solid var(--line); }
+label.check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+label.check input { width: auto; margin: 0; }

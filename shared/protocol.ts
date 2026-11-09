@@ -1,6 +1,7 @@
 // Messages and data shared between the game server and every screen.
 
 import type { AreaShape, Character } from './rules.ts';
+import type { Homebrew, HomebrewKind } from './homebrew.ts';
 export type { Character };
 
 export type Role = 'table' | 'player' | 'dm';
@@ -92,6 +93,7 @@ export interface World {
   nextTokenId: number;
   characters: Record<string, Character>;
   areas: Area[];
+  homebrew: Homebrew;
 }
 
 /** A dice roll made through the app; shown on the Main Screen at the roller's seat. */
@@ -141,6 +143,7 @@ export interface RoomState {
   characters: Character[];
   rolls: DiceRoll[]; // the latest rolls, newest first
   areas: Area[];
+  homebrew: Homebrew;
 }
 
 /** Standard CSS pixels per mm (96 per inch): used until the Main Screen is calibrated. */
@@ -197,6 +200,9 @@ export interface Requests {
   'character:save': { args: { character: Character }; result: { id: string } };
   'character:delete': { args: { characterId: string }; result: null };
   'character:assign': { args: { characterId: string; memberId: string | null }; result: null }; // DM
+  // ---- custom content (anyone can add; the DM or the maker can change or delete) ----
+  'homebrew:save': { args: { kind: HomebrewKind; entry: Record<string, unknown> }; result: { entryId: string } };
+  'homebrew:delete': { args: { kind: HomebrewKind; entryId: string }; result: null };
   // ---- spell and effect areas on the map ----
   'area:add': { args: { area: Omit<Area, 'id' | 'placedBy' | 'at'> }; result: { id: string } };
   'area:remove': { args: { areaId: string }; result: null };
