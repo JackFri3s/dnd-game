@@ -61,6 +61,10 @@ export interface Token {
   /** Monsters and NPCs: their own numbers (player tokens use their character). */
   stats?: TokenStats;
   conditions?: string[]; // condition indexes, e.g. "prone", "poisoned"
+  exhaustion?: number; // exhaustion level 1-6 (each: -2 to d20 rolls, -5 ft speed)
+  raging?: boolean;
+  /** The spell this creature is concentrating on, and what ends with it. */
+  concentration?: { spell: string; areaId?: string; conditions?: { tokenId: string; condition: string }[] };
 }
 
 export interface TokenStats {
@@ -80,8 +84,21 @@ export interface Combat {
   turn: number; // index into order
   order: { tokenId: string; init: number | null }[];
   moved: Record<string, number>; // feet moved this turn
-  used: Record<string, { action?: boolean; bonus?: boolean; reaction?: boolean; dash?: boolean }>;
+  used: Record<string, TurnUse>;
 }
+
+/** What a creature has used this turn (reset when its next turn starts). */
+export interface TurnUse {
+  action?: boolean;
+  bonus?: boolean;
+  reaction?: boolean;
+  dash?: boolean;
+  disengage?: boolean;
+  dodge?: boolean;
+  sneak?: boolean; // Sneak Attack used this turn
+}
+export type TurnUseKey = keyof TurnUse;
+export type Advantage = 'adv' | 'dis' | null;
 
 /** What an attack or saving throw did, shown with its roll on every screen. */
 export interface RollOutcome {
@@ -234,7 +251,13 @@ export interface Requests {
   'combat:begin': { args: Record<string, never>; result: null }; // DM: rolls anyone missing, round 1
   'combat:next': { args: Record<string, never>; result: null }; // DM or whoever's turn it is
   'combat:end': { args: Record<string, never>; result: null }; // DM
-  'combat:use': { args: { tokenId: string; what: 'action' | 'bonus' | 'reaction' | 'dash'; value: boolean }; result: null };
+  'combat:use': { args: { tokenId: string; what: TurnUseKey; value: boolean }; result: null };
+  'combat:rage': { args: { tokenId: string; on: boolean }; result: null };
+  'combat:deathsave': { args: { tokenId: string }; result: { roll: DiceRoll } };
+  'combat:heal': { args: { healerId: string | null; targetId: string; label: string; dice: { count: number; sides: number }[]; bonus: number }; result: { roll: DiceRoll } };
+  /** Start (or, with spell null, drop) concentration; a new spell ends the old one. */
+  'combat:concentrate': { args: { tokenId: string; spell: string | null; areaId?: string }; result: null };
+  'token:exhaustion': { args: { tokenId: string; level: number }; result: null };
   /** An attack roll against a target's AC; on a hit the damage is rolled and applied. */
   'combat:attack': {
     args: {
@@ -246,6 +269,10 @@ export interface Requests {
       damageBonus: number;
       damageType: string;
       extra?: { count: number; sides: number; type: string }[]; // more damage on a hit (e.g. "plus 2d4 Fire")
+      melee?: boolean; // within 5 ft: matters for prone targets and automatic critical hits
+      advantage?: Advantage; // chosen by the player/DM; conditions are added by the server
+      sneakAttack?: { count: number; sides: number }; // rogues, once per turn
+      concentration?: string; // the spell needs concentration
     };
     result: { roll: DiceRoll };
   };
@@ -261,6 +288,9 @@ export interface Requests {
       damageBonus: number;
       damageType: string;
       half: boolean;
+      condition?: string; // given on a failed save (e.g. "paralyzed")
+      concentration?: string; // the spell needs concentration (conditions end with it)
+      areaId?: string;
     };
     result: { roll: DiceRoll };
   };

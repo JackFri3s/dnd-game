@@ -6,7 +6,7 @@ import { SIDE_ICON } from '../seats.ts';
 import { MapBoard, type Camera } from '../components/MapBoard.tsx';
 import { CalibrationControls } from '../components/CalibrationControls.tsx';
 import { CampaignPanel } from '../components/CampaignPanel.tsx';
-import { ActionPanel, AimBar, useAim } from '../components/Actions.tsx';
+import { ActionPanel, AimBar, useAim, useLocalHighlight } from '../components/Actions.tsx';
 import { CombatPanel, MonsterBlock, MonsterPicker, RollResult, TargetBar, TokenStatus, combatInfo, useMonsters, useTargeting } from '../components/Combat.tsx';
 import { useRules } from '../rules/index.ts';
 import { CharacterList } from '../characters/CharacterList.tsx';
@@ -14,16 +14,14 @@ import { HomebrewPanel } from '../characters/HomebrewPanel.tsx';
 import { seatNumber } from '../seats.ts';
 
 const TOKEN_SHADES = ['#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3'];
-type Panel = 'token' | 'combat' | 'add' | 'characters' | 'custom' | 'campaign' | 'screen' | 'players';
+type Panel = 'token' | 'combat' | 'add' | 'party' | 'campaign' | 'table';
 const PANELS: { id: Panel; label: string }[] = [
   { id: 'token', label: 'Selected' },
   { id: 'combat', label: 'Combat' },
   { id: 'add', label: 'Add' },
-  { id: 'characters', label: 'Characters' },
-  { id: 'custom', label: 'Custom' },
+  { id: 'party', label: 'Party' },
   { id: 'campaign', label: 'Campaign' },
-  { id: 'screen', label: 'Main Screen' },
-  { id: 'players', label: 'Players' },
+  { id: 'table', label: 'Main Screen' },
 ];
 
 /** The DM's device during play: the whole map, every token, and the controls. */
@@ -31,6 +29,10 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const [camera, setCamera] = useState<Camera>({ ...state.view, scale: 40 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>('add');
+  const [partyTab, setPartyTab] = useState<'characters' | 'players'>('characters');
+  const [campaignTab, setCampaignTab] = useState<'saves' | 'custom'>('saves');
+  const [showStats, setShowStats] = useState(true);
+  const highlight = useLocalHighlight();
   const [menu, setMenu] = useState(false);
   const side = usePanelSide();
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +44,8 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const owner = selected?.ownerId ? state.members.find((m) => m.id === selected.ownerId) : null;
   const selectedCharacter = selected?.characterId ? (state.characters.find((c) => c.id === selected.characterId) ?? null) : null;
   const rules = useRules(state.homebrew);
-  const aimState = useAim(store, state);
-  const targeting = useTargeting(store, state);
+  const aimState = useAim(store, state, highlight);
+  const targeting = useTargeting(store, state, highlight);
   const { current, movedFt } = combatInfo(state);
   const monsters = useMonsters();
   const selectedMonster = selected?.stats?.monster ? monsters?.find((m) => m.index === selected.stats!.monster) : undefined;
@@ -56,22 +58,31 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   return (
     <div className={`game-layout panel-${side}`} data-testid="dm-game">
       <header className="game-bar">
-        <strong className="grow">{state.campaign?.name ?? 'Dungeon Master'}</strong>
-        <span className="hint">{state.code}</span>
-        <span className={`dot ${table?.connected ? 'on' : 'off'}`} title={`Main Screen ${table?.connected ? 'connected' : 'offline'}`} />
-        <button className="button small" onClick={() => setCamera({ ...camera, ...state.view })}>Find Main Screen</button>
-        <button className="button small" onClick={() => nextPanelSide(side)} aria-label="Move the controls" title="Move the controls to another side">
+        <div className="grow title-block">
+          <strong>{state.campaign?.name ?? 'Dungeon Master'}</strong>
+          <span className="hint">
+            game {state.code} · <span className={`dot ${table?.connected ? 'on' : 'off'}`} /> Main Screen {table?.connected ? 'on' : 'off'}
+          </span>
+        </div>
+        <button className="button small" onClick={() => setCamera({ ...camera, ...state.view })} title="Centre your map on what the Main Screen shows">
+          ◎ Main Screen
+        </button>
+        <button className="icon-btn" onClick={() => nextPanelSide(side)} aria-label="Move the controls" title="Move the controls to another side">
           {SIDE_ICON[side]}
         </button>
-        <button className="button small" onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu">☰</button>
+        <button className={`icon-btn ${menu ? 'on' : ''}`} onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu">
+          ☰
+        </button>
       </header>
       {menu && (
         <div className="game-menu">
-          <button className="text-button" onClick={() => run(store.request('game:phase', { phase: 'lobby' }))}>
-            Back to the lobby (shows the join screen on the Main Screen)
-          </button>
-          <a className="text-button" href="/settings">Settings</a>
-          <button className="text-button" onClick={() => store.leave()}>Leave game</button>
+          <div className="button-row">
+            <button className="button" onClick={() => run(store.request('game:phase', { phase: 'lobby' }))} title="Shows the join screen on the Main Screen again">
+              Back to the lobby
+            </button>
+            <a className="button" href="/settings">Settings</a>
+            <button className="button danger" onClick={() => store.leave()}>Leave game</button>
+          </div>
         </div>
       )}
       <div className="game-body">
@@ -93,27 +104,38 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
           currentTokenId={current?.id ?? null}
           showHp
           areaPreview={aimState.preview}
+          localHighlight={highlight.local}
         />
       </div>
       <footer className="game-controls">
-        <nav className="tabs">
+        <nav className="tab-bar">
           {PANELS.map((p) => (
-            <button key={p.id} className={panel === p.id ? 'on' : ''} onClick={() => setPanel(p.id)}>
-              {p.id === 'players' ? `${p.label} (${players.length})` : p.label}
+            <button key={p.id} className={panel === p.id ? 'on' : ''} onClick={() => setPanel(p.id)} data-testid={`tab-${p.id}`}>
+              {p.label}
+              {p.id === 'combat' && state.combat ? <span className="tab-dot" /> : null}
             </button>
           ))}
         </nav>
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error" onClick={() => setError(null)}>
+            {error}
+          </p>
+        )}
 
         {panel === 'token' &&
           (selected ? (
             <div className="stack-sm">
-              <p className="row">
-                <span className="badge-dot" style={{ background: selected.color }} />
-                <strong>{selected.name}</strong>
-                <span className="hint">{selected.kind === 'player' ? (owner ? `played by ${owner.name}` : 'no player') : selected.kind}</span>
-              </p>
+              <div className="selected-head">
+                <span className="badge-dot big" style={{ background: selected.color }} />
+                <div className="grow">
+                  <strong>{selected.name}</strong>
+                  <div className="hint">{selected.kind === 'player' ? (owner ? `played by ${owner.name}` : 'no player') : selected.stats?.monster ? `monster · AC ${selected.stats.ac}` : selected.kind}</div>
+                </div>
+                <button className="icon-btn" onClick={() => setSelectedId(null)} aria-label="Deselect">✕</button>
+              </div>
+              <h4 className="section-label">Health and conditions</h4>
               <TokenStatus store={store} state={state} token={selected} rules={rules} />
+              <h4 className="section-label">Actions</h4>
               {targeting.pending ? (
                 <TargetBar targeting={targeting} />
               ) : aimState.aim ? (
@@ -129,9 +151,18 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
                   canRemoveArea={() => true}
                   dmTools
                   targeting={targeting}
+                  highlight={highlight}
                 />
               )}
-              {selectedMonster && !targeting.pending && <MonsterBlock monster={selectedMonster} token={selected} targeting={targeting} />}
+              {selectedMonster && !targeting.pending && (
+                <>
+                  <button className="section-toggle" onClick={() => setShowStats(!showStats)} aria-expanded={showStats}>
+                    Stat block {showStats ? '▾' : '▸'}
+                  </button>
+                  {showStats && <MonsterBlock monster={selectedMonster} token={selected} targeting={targeting} />}
+                </>
+              )}
+              <h4 className="section-label">Token</h4>
               {selected.kind === 'player' && (
                 <label className="inline-label">
                   Played by
@@ -149,18 +180,21 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
                 </label>
               )}
               <button
-                className="text-button"
+                className="button danger"
                 onClick={() => {
                   if (!confirm(`Remove ${selected.name} from the map?`)) return;
                   run(store.request('token:remove', { tokenId: selected.id }));
                   setSelectedId(null);
                 }}
               >
-                Remove {selected.name}
+                Remove {selected.name} from the map
               </button>
             </div>
           ) : (
-            <p className="hint">Tap a token on the map to select it. Drag tokens to move them.</p>
+            <div className="empty-state">
+              <strong>Nothing selected</strong>
+              <p className="hint">Tap a token on the map to see its health, conditions and actions. Drag tokens to move them.</p>
+            </div>
           ))}
 
         {panel === 'combat' && (
@@ -176,27 +210,42 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
 
         {panel === 'add' && (
           <>
-            <div className="label">Monster from the rules</div>
+            <h4 className="section-label">A monster from the rules</h4>
             <MonsterPicker store={store} onAdded={(id) => setSelectedId(id)} />
-            <div className="label">Or your own token</div>
+            <h4 className="section-label">Your own token</h4>
             <AddToken store={store} onAdded={(id) => setSelectedId(id)} />
           </>
         )}
 
-        {panel === 'characters' && <CharacterList store={store} state={state} />}
+        {panel === 'party' && (
+          <>
+            <div className="segmented">
+              <button className={partyTab === 'characters' ? 'on' : ''} onClick={() => setPartyTab('characters')}>Characters ({state.characters.length})</button>
+              <button className={partyTab === 'players' ? 'on' : ''} onClick={() => setPartyTab('players')}>Players ({players.length})</button>
+            </div>
+            {partyTab === 'characters' && <CharacterList store={store} state={state} />}
+          </>
+        )}
 
-        {panel === 'custom' && (rules ? <HomebrewPanel store={store} homebrew={state.homebrew} rules={rules} myId="" isDm /> : <p className="hint">Loading the rules…</p>)}
+        {panel === 'campaign' && (
+          <>
+            <div className="segmented">
+              <button className={campaignTab === 'saves' ? 'on' : ''} onClick={() => setCampaignTab('saves')}>Saving</button>
+              <button className={campaignTab === 'custom' ? 'on' : ''} onClick={() => setCampaignTab('custom')}>Custom content</button>
+            </div>
+            {campaignTab === 'saves' && <CampaignPanel store={store} state={state} />}
+            {campaignTab === 'custom' && (rules ? <HomebrewPanel store={store} homebrew={state.homebrew} rules={rules} myId="" isDm /> : <p className="hint">Loading the rules…</p>)}
+          </>
+        )}
 
-        {panel === 'campaign' && <CampaignPanel store={store} state={state} />}
-
-        {panel === 'screen' && (
-          <div>
-            <p className="hint">Drag the "Main Screen" handle on the map to change what the table shows.</p>
+        {panel === 'table' && (
+          <div className="stack-sm">
+            <p className="hint">Drag the "Main Screen" frame's handle on your map to change what the table shows.</p>
             <CalibrationControls store={store} table={state.table} />
           </div>
         )}
 
-        {panel === 'players' && (
+        {panel === 'party' && partyTab === 'players' && (
           <ul className="list">
             {players.length === 0 && <li className="hint">No players yet.</li>}
             {players.map((p) => (
@@ -256,7 +305,7 @@ function AddToken({ store, onAdded }: { store: GameStore; onAdded: (id: string) 
         ))}
       </div>
       <button className="button primary block">Add to the map</button>
-      <p className="hint">It appears in the middle of what the Main Screen shows.</p>
+      <p className="hint">New tokens appear in the middle of what the Main Screen shows.</p>
       {error && <p className="error">{error}</p>}
     </form>
   );

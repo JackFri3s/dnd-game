@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { DiceRoll, RoomState, Token, TokenStats } from '../../../shared/protocol.ts';
+import type { Advantage, DiceRoll, RoomState, Token, TokenStats } from '../../../shared/protocol.ts';
+import type { LocalHighlight } from './Actions.tsx';
 import { ABILITIES, ABILITY_NAMES, mod, type Ability, type RulesData, type RulesMonster } from '../../../shared/rules.ts';
 import { TOKEN_RADIUS, dist, inRange, type Point } from '../../../shared/geometry.ts';
 import type { GameStore } from '../game.ts';
@@ -64,78 +65,116 @@ export function monsterStats(m: RulesMonster): TokenStats {
 // Targeting: choose an attack or spell, then tap who it's aimed at
 // ---------------------------------------------------------------------------
 
-export type Pending =
+export type Pending = (
   | {
       kind: 'attack';
-      attackerId: string;
-      label: string;
       toHit: number;
       damage: string; // "1d8+3 slashing"
       extra?: { count: number; sides: number; type: string }[];
-      rangeFt: number;
       longFt?: number;
+      melee?: boolean;
+      sneak?: string; // rogues: "2d6"
+      /** Monsters' Multiattack: several attacks in a row against the target. */
+      sequence?: { label: string; toHit: number; damage: string; extra?: { count: number; sides: number; type: string }[] }[];
     }
-  | { kind: 'save'; attackerId: string; label: string; ability: Ability; dc: number; damage: string; half: boolean; rangeFt: number };
+  | { kind: 'save'; ability: Ability; dc: number; damage: string; half: boolean; condition?: string }
+  | { kind: 'heal'; dice: string; bonus: number }
+) & { attackerId: string; label: string; rangeFt: number; concentration?: string; onDone?: () => Promise<void> };
 
-export function useTargeting(store: GameStore, state: RoomState) {
+export function useTargeting(store: GameStore, state: RoomState, highlight: LocalHighlight) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [result, setResult] = useState<DiceRoll | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [advantage, setAdvantage] = useState<Advantage>(null);
+  const [sneak, setSneak] = useState(false);
 
   useEffect(() => {
     if (!result) return;
-    const t = setTimeout(() => setResult(null), 7000);
+    const t = setTimeout(() => setResult(null), 8000);
     return () => clearTimeout(t);
   }, [result]);
 
   function start(p: Pending) {
     setError(null);
+    setAdvantage(null);
+    setSneak(false);
     setPending(p);
-    store
-      .request('highlight:set', { highlight: { tokenId: p.attackerId, kind: p.kind === 'save' ? 'spell' : 'range', feet: p.rangeFt, label: p.label, ...(p.kind === 'attack' && p.longFt ? { longFeet: p.longFt } : {}) } })
-      .catch(() => {});
+    // The range shows on this screen only.
+    highlight.setLocal({
+      tokenId: p.attackerId,
+      kind: p.kind === 'attack' ? 'range' : 'spell',
+      feet: p.rangeFt,
+      label: p.label,
+      ...(p.kind === 'attack' && p.longFt ? { longFeet: p.longFt } : {}),
+    });
   }
 
   function cancel() {
     setPending(null);
     setError(null);
-    store.request('highlight:set', { highlight: null }).catch(() => {});
+    highlight.setLocal(null);
   }
 
   /** Called with the point tapped on the map: picks the token there. */
   async function tap(at: Point) {
     if (!pending) return;
-    const target = state.tokens.find((t) => dist(t, at) <= TOKEN_RADIUS + 0.1 && t.id !== pending.attackerId);
+    const target = state.tokens.find((t) => dist(t, at) <= TOKEN_RADIUS + 0.1 && (t.id !== pending.attackerId || pending.kind === 'heal'));
     if (!target) return setError('Tap the creature you want to target.');
     const attacker = state.tokens.find((t) => t.id === pending.attackerId);
-    if (attacker && !inRange(attacker, target, pending.kind === 'attack' ? (pending.longFt ?? pending.rangeFt) : pending.rangeFt)) {
+    if (attacker && target.id !== attacker.id && !inRange(attacker, target, pending.kind === 'attack' ? (pending.longFt ?? pending.rangeFt) : pending.rangeFt)) {
       return setError(`${target.name} is out of range.`);
     }
     try {
-      const d = parseDamageText(pending.damage);
-      const { roll } =
-        pending.kind === 'attack'
-          ? await store.request('combat:attack', {
-              attackerId: pending.attackerId,
-              targetId: target.id,
-              label: pending.label,
-              toHit: pending.toHit,
-              damage: d.dice,
-              damageBonus: d.bonus,
-              damageType: d.type,
-              ...(pending.extra ? { extra: pending.extra } : {}),
-            })
-          : await store.request('combat:save', {
-              attackerId: pending.attackerId,
-              targetIds: [target.id],
-              label: pending.label,
-              ability: pending.ability,
-              dc: pending.dc,
-              damage: d.dice,
-              damageBonus: d.bonus,
-              damageType: d.type,
-              half: pending.half,
-            });
+      let roll: DiceRoll;
+      if (pending.kind === 'attack') {
+        const steps = pending.sequence ?? [{ label: pending.label, toHit: pending.toHit, damage: pending.damage, extra: pending.extra }];
+        let last: DiceRoll | null = null;
+        const outcomes = [];
+        for (const step of steps) {
+          const d = parseDamageText(step.damage);
+          const sneakDice = sneak && pending.sneak ? parseDamageText(pending.sneak).dice[0] : undefined;
+          ({ roll: last } = await store.request('combat:attack', {
+            attackerId: pending.attackerId,
+            targetId: target.id,
+            label: step.label,
+            toHit: step.toHit,
+            damage: d.dice,
+            damageBonus: d.bonus,
+            damageType: d.type,
+            melee: !!pending.melee,
+            advantage,
+            ...(step.extra ? { extra: step.extra } : {}),
+            ...(sneakDice ? { sneakAttack: sneakDice } : {}),
+            ...(pending.concentration ? { concentration: pending.concentration } : {}),
+          }));
+          outcomes.push(...(last.outcomes ?? []).map((o) => ({ ...o, target: `${step.label} → ${o.target}` })));
+        }
+        roll = steps.length > 1 ? { ...last!, label: `${attacker?.name}: ${pending.label}`, outcomes } : last!;
+      } else if (pending.kind === 'save') {
+        const d = parseDamageText(pending.damage);
+        ({ roll } = await store.request('combat:save', {
+          attackerId: pending.attackerId,
+          targetIds: [target.id],
+          label: pending.label,
+          ability: pending.ability,
+          dc: pending.dc,
+          damage: d.dice,
+          damageBonus: d.bonus,
+          damageType: d.type,
+          half: pending.half,
+          ...(pending.condition ? { condition: pending.condition } : {}),
+          ...(pending.concentration ? { concentration: pending.concentration } : {}),
+        }));
+      } else {
+        ({ roll } = await store.request('combat:heal', {
+          healerId: pending.attackerId,
+          targetId: target.id,
+          label: pending.label,
+          dice: parseDamageText(pending.dice).dice,
+          bonus: pending.bonus,
+        }));
+      }
+      await pending.onDone?.();
       setResult(roll);
       cancel();
     } catch (e) {
@@ -143,24 +182,45 @@ export function useTargeting(store: GameStore, state: RoomState) {
     }
   }
 
-  return { pending, result, error, start, cancel, tap, clearResult: () => setResult(null) };
+  return { pending, result, error, start, cancel, tap, advantage, setAdvantage, sneak, setSneak, clearResult: () => setResult(null) };
 }
 
-/** While choosing a target: what's being done, and Cancel. Afterwards: what happened. */
+/** While choosing a target: what's being done, advantage, and Cancel. */
 export function TargetBar({ targeting }: { targeting: ReturnType<typeof useTargeting> }) {
   const { pending, error } = targeting;
   if (!pending) return null;
   return (
-    <div className="aim-bar" data-testid="target-bar">
-      <div className="grow">
-        <strong className="attack-label">{pending.label}</strong>
-        <div className="hint">
-          {pending.kind === 'attack' ? `${pending.toHit >= 0 ? '+' : ''}${pending.toHit} to hit · ${pending.damage}` : `DC ${pending.dc} ${pending.ability.toUpperCase()} save · ${pending.damage || 'no damage'}`}
-          . Tap the target on the map.
-        </div>
-        {error && <div className="error">{error}</div>}
+    <div className={`action-bar ${pending.kind === 'attack' ? 'range' : 'spell'}`} data-testid="target-bar">
+      <div className="action-bar-title">
+        <strong>{pending.label}</strong>
+        <span className="hint">
+          {pending.kind === 'attack'
+            ? `${pending.toHit >= 0 ? '+' : ''}${pending.toHit} to hit · ${pending.damage}${pending.sequence ? ` · ${pending.sequence.length} attacks` : ''}`
+            : pending.kind === 'save'
+              ? `DC ${pending.dc} ${pending.ability.toUpperCase()} save · ${pending.damage || pending.condition || 'no damage'}`
+              : `heals ${pending.dice}${pending.bonus ? ` + ${pending.bonus}` : ''}`}
+        </span>
       </div>
-      <button className="button small" onClick={targeting.cancel}>Cancel</button>
+      <p className="hint">Tap the target on the map.</p>
+      {pending.kind === 'attack' && (
+        <div className="segmented small" role="radiogroup" aria-label="Advantage">
+          {([null, 'adv', 'dis'] as Advantage[]).map((a) => (
+            <button key={String(a)} role="radio" aria-checked={targeting.advantage === a} className={targeting.advantage === a ? 'on' : ''} onClick={() => targeting.setAdvantage(a)}>
+              {a === 'adv' ? 'Advantage' : a === 'dis' ? 'Disadvantage' : 'Normal'}
+            </button>
+          ))}
+        </div>
+      )}
+      {pending.kind === 'attack' && pending.sneak && (
+        <label className="check">
+          <input type="checkbox" checked={targeting.sneak} onChange={(e) => targeting.setSneak(e.target.checked)} /> Add Sneak Attack ({pending.sneak}, once per turn)
+        </label>
+      )}
+      <p className="hint small">Conditions (prone, blinded, poisoned…) add advantage or disadvantage by themselves.</p>
+      {error && <p className="error">{error}</p>}
+      <div className="button-row">
+        <button className="button" onClick={targeting.cancel}>Cancel</button>
+      </div>
     </div>
   );
 }
@@ -183,6 +243,33 @@ export function RollResult({ roll, onClose }: { roll: DiceRoll | null; onClose: 
   );
 }
 
+const NUMBERS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5 };
+
+/** The attacks a monster's Multiattack makes, in order. */
+function multiattackSequence(desc: string, attacks: RulesMonster['actions']) {
+  const out: { label: string; toHit: number; damage: string; extra?: { count: number; sides: number; type: string }[]; rangeFt: number; melee: boolean }[] = [];
+  const toStep = (a: RulesMonster['actions'][number]) => ({
+    label: a.name,
+    toHit: a.attack!,
+    damage: `${a.damage![0].dice} ${a.damage![0].type}`,
+    extra: a.damage!.slice(1).filter((x) => !x.conditional).map((x) => ({ ...parseDamageText(x.dice).dice[0], type: x.type })).filter((x) => x.count),
+    rangeFt: a.range?.normal ?? a.reach ?? 5,
+    melee: !!a.reach && !a.range,
+  });
+  // "makes two Scimitar attacks" / "makes one Bite attack and two Claw attacks"
+  for (const m of desc.matchAll(/(one|two|three|four|five) ([A-Z][\w' ]*?) attacks?/g)) {
+    const a = attacks.find((x) => x.name.toLowerCase() === m[2].toLowerCase());
+    if (a) for (let i = 0; i < NUMBERS[m[1]]; i++) out.push(toStep(a));
+  }
+  // "makes two attacks, using Scimitar or Shortbow in any combination": use the first named.
+  if (!out.length) {
+    const count = NUMBERS[desc.match(/makes (one|two|three|four|five) attacks/)?.[1] ?? ''] ?? 0;
+    const a = attacks.find((x) => desc.includes(x.name)) ?? attacks[0];
+    if (a) for (let i = 0; i < count; i++) out.push(toStep(a));
+  }
+  return out;
+}
+
 export function outcomeText(r: string) {
   return { hit: 'hit', crit: 'critical hit!', miss: 'miss', saved: 'saved', failed: 'failed the save' }[r] ?? r;
 }
@@ -203,7 +290,8 @@ export function CombatBar({ store, state, token }: { store: GameStore; state: Ro
   const ch = token?.characterId ? state.characters.find((c) => c.id === token.characterId) : undefined;
   const speed = (ch?.summary.speedFt ?? token?.speedFt ?? 30) * (u.dash ? 2 : 1);
   const left = token ? Math.max(0, speed - movedFt(token)) : 0;
-  const toggle = (what: 'action' | 'bonus' | 'reaction' | 'dash') => token && run(store.request('combat:use', { tokenId: token.id, what, value: !u[what] }));
+  const toggle = (what: 'action' | 'bonus' | 'reaction' | 'dash' | 'disengage' | 'dodge') => token && run(store.request('combat:use', { tokenId: token.id, what, value: !u[what] }));
+  const atZero = !!ch && ch.hp.current <= 0 && !(token?.conditions ?? []).includes('dead');
 
   return (
     <div className={`combat-bar ${myTurn ? 'my-turn' : ''}`} data-testid="combat-bar">
@@ -223,17 +311,32 @@ export function CombatBar({ store, state, token }: { store: GameStore; state: Ro
             <strong className="grow">Your turn · round {combat.round}</strong>
             <span className="hint">{formatDistance(left, unit)} left</span>
           </div>
-          <div className="chip-row">
-            {(['action', 'bonus', 'reaction', 'dash'] as const).map((w) => (
-              <button key={w} className={`chip ${u[w] ? 'used' : ''}`} onClick={() => toggle(w)} aria-pressed={!!u[w]}>
-                {{ action: 'Action', bonus: 'Bonus action', reaction: 'Reaction', dash: 'Dash' }[w]}
-                {u[w] ? ' ✓' : ''}
+          {atZero && (
+            <div className="death-prompt">
+              <span className="grow">You're at 0 HP: roll a death saving throw.</span>
+              <button className="button small primary important-red" onClick={() => token && run(store.request('combat:deathsave', { tokenId: token.id }))} data-testid="death-save">
+                Death save
+              </button>
+            </div>
+          )}
+          <div className="use-grid">
+            {(['action', 'bonus', 'reaction'] as const).map((w) => (
+              <button key={w} className={`use-button ${u[w] ? 'used' : ''}`} onClick={() => toggle(w)} aria-pressed={!!u[w]}>
+                {{ action: 'Action', bonus: 'Bonus', reaction: 'Reaction' }[w]}
+                <small>{u[w] ? 'used' : 'ready'}</small>
               </button>
             ))}
-            <button className="button small primary" onClick={() => run(store.request('combat:next', {}))} data-testid="end-turn">
-              End turn
-            </button>
           </div>
+          <div className="use-grid">
+            {(['dash', 'disengage', 'dodge'] as const).map((w) => (
+              <button key={w} className={`use-button option ${u[w] ? 'on' : ''}`} onClick={() => toggle(w)} aria-pressed={!!u[w]} title={w === 'dash' ? 'Double movement' : w === 'disengage' ? 'No opportunity attacks' : 'Attacks against you have disadvantage'}>
+                {w[0].toUpperCase() + w.slice(1)}
+              </button>
+            ))}
+          </div>
+          <button className="button primary block" onClick={() => run(store.request('combat:next', {}))} data-testid="end-turn">
+            End turn
+          </button>
         </>
       ) : (
         <div className="row">
@@ -381,8 +484,13 @@ export function TokenStatus({ store, state, token, rules }: { store: GameStore; 
           <button className="button small" onClick={() => change(1)}>Heal</button>
         </div>
       )}
+      <div className="row exhaustion">
+        <span className="grow">Exhaustion {token.exhaustion ? <strong>level {token.exhaustion}</strong> : <span className="hint">none</span>}</span>
+        <button className="button small" disabled={!token.exhaustion} onClick={() => run(store.request('token:exhaustion', { tokenId: token.id, level: (token.exhaustion ?? 0) - 1 }))} aria-label="Less exhaustion">−</button>
+        <button className="button small" disabled={(token.exhaustion ?? 0) >= 6} onClick={() => run(store.request('token:exhaustion', { tokenId: token.id, level: (token.exhaustion ?? 0) + 1 }))} aria-label="More exhaustion">+</button>
+      </div>
       <div className="pill-grid conditions">
-        {(rules?.conditions ?? []).map((c) => {
+        {(rules?.conditions ?? []).filter((c) => c.index !== 'exhaustion').map((c) => {
           const on = conditions.includes(c.index);
           return (
             <button
@@ -405,6 +513,9 @@ export function TokenStatus({ store, state, token, rules }: { store: GameStore; 
 export function MonsterBlock({ monster, token, targeting }: { monster: RulesMonster; token: Token; targeting: ReturnType<typeof useTargeting> }) {
   const { unit } = useSettings();
   const actions = [...monster.actions, ...monster.bonusActions];
+  // "Multiattack: The goblin makes two Scimitar attacks" -> the attacks it lists.
+  const multi = monster.actions.find((a) => a.name === 'Multiattack');
+  const sequence = multi ? multiattackSequence(multi.desc, monster.actions.filter((a) => a.attack !== undefined && a.damage?.length)) : [];
   return (
     <div className="monster-block" data-testid="monster-block">
       <div className="hint">
@@ -428,6 +539,26 @@ export function MonsterBlock({ monster, token, targeting }: { monster: RulesMons
           <strong>{t.name}.</strong> {t.desc}
         </p>
       ))}
+      {sequence.length > 1 && (
+        <button
+          className="button important-red block"
+          onClick={() =>
+            targeting.start({
+              kind: 'attack',
+              attackerId: token.id,
+              label: 'Multiattack',
+              toHit: sequence[0].toHit,
+              damage: sequence[0].damage,
+              rangeFt: Math.max(...sequence.map((x) => x.rangeFt)),
+              melee: sequence.every((x) => x.melee),
+              sequence,
+            })
+          }
+          data-testid="multiattack"
+        >
+          Multiattack ({sequence.map((x) => x.label).join(', ')})
+        </button>
+      )}
       {actions.map((a) => {
         const main = a.damage?.[0];
         const extra = a.damage?.slice(1).filter((d) => !d.conditional).map((d) => ({ ...parseDamageText(d.dice).dice[0], type: d.type }));
@@ -449,6 +580,7 @@ export function MonsterBlock({ monster, token, targeting }: { monster: RulesMons
                     extra: extra?.filter((x) => x.count),
                     rangeFt: a.range?.normal ?? a.reach ?? 5,
                     longFt: a.range?.long,
+                    melee: !!a.reach && !a.range,
                   })
                 }
               >
@@ -467,6 +599,7 @@ export function MonsterBlock({ monster, token, targeting }: { monster: RulesMons
                     dc: a.dc!.value,
                     damage: main ? `${main.dice} ${main.type}` : '',
                     half: /half as much/i.test(a.desc),
+                    condition: a.desc.match(/(?:has|have) the (Blinded|Charmed|Deafened|Frightened|Grappled|Incapacitated|Paralyzed|Poisoned|Prone|Restrained|Stunned) condition/)?.[1].toLowerCase(),
                     rangeFt: a.range?.normal ?? a.reach ?? 60,
                   })
                 }
@@ -506,7 +639,6 @@ export function MonsterPicker({ store, onAdded }: { store: GameStore; onAdded: (
         last = tokenId;
       }
       onAdded(last);
-      setQuery('');
       setError(null);
     } catch (e) {
       setError((e as Error).message);

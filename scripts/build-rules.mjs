@@ -60,6 +60,20 @@ function spellDamage(s) {
   return dice ? { damage: `${dice} ${s.damage.damage_type?.name ?? ''}`.trim() } : {};
 }
 
+/** Higher-level casting, cantrip scaling, healing and the condition a failed save gives. */
+function spellExtras(s) {
+  const text = `${s.description ?? ''} ${s.higher_level ?? ''}`;
+  const out = {};
+  const up = text.match(/increases by (\d+)d(\d+) for each (?:spell slot )?level above/);
+  if (up) out.upcast = { count: Number(up[1]), sides: Number(up[2]) };
+  if (/Cantrip Upgrade/.test(text) && s.level === 0) out.cantripScales = true;
+  const heal = text.match(/regains? (?:a number of )?Hit Points equal to (\d+d\d+)/);
+  if (heal) out.healing = heal[1];
+  const cond = text.match(/(?:have|has|gains?) the (Blinded|Charmed|Deafened|Frightened|Grappled|Incapacitated|Invisible|Paralyzed|Petrified|Poisoned|Prone|Restrained|Stunned|Unconscious) condition/);
+  if (cond && s.description.includes('saving throw')) out.condition = cond[1].toLowerCase();
+  return out;
+}
+
 /** The saving throw a spell asks for ("makes a Dexterity saving throw" -> "dex"). */
 function spellSave(text = '') {
   const m = text.match(/(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw/);
@@ -194,6 +208,7 @@ const data = {
     ...(s.attack_type ? { attack: s.attack_type } : {}),
     ...spellDamage(s),
     ...spellSave(s.description),
+    ...spellExtras(s),
     components: [(s.components ?? []).join(', '), s.material ? `(${s.material})` : ''].filter(Boolean).join(' '),
     duration: s.duration ?? '',
     concentration: !!s.concentration,

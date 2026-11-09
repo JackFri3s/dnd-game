@@ -353,14 +353,23 @@ export class GameRoom extends DurableObject<Env> {
           const current = combat.order[combat.turn]?.tokenId;
           if (me.role === 'player' && current !== token.id) throw new GameError("It's not your turn.");
           if (current === token.id) {
+            if (me.role === 'player' && hasCondition(token, 'grappled', 'restrained', 'paralyzed', 'stunned', 'unconscious', 'petrified', 'dead')) {
+              throw new GameError(`${token.name} can't move right now (${(token.conditions ?? []).join(', ')}).`);
+            }
+            // Standing up from Prone costs half your speed.
+            if (hasCondition(token, 'prone')) {
+              combat.moved[token.id] = (combat.moved[token.id] ?? 0) + Math.floor(speedOf(room, token) / 2);
+              token.conditions = (token.conditions ?? []).filter((c) => c !== 'prone');
+            }
             const moved = (combat.moved[token.id] ?? 0) + dist(token, spot) * 5;
-            const limit = speedOf(room, token) * (combat.used[token.id]?.dash ? 2 : 1);
+            const limit = Math.max(0, speedOf(room, token) - 5 * (token.exhaustion ?? 0)) * (combat.used[token.id]?.dash ? 2 : 1);
             if (me.role === 'player' && moved > limit + 0.5) {
               throw new GameError(`Only ${Math.max(0, Math.floor(limit - (combat.moved[token.id] ?? 0)))} ft of movement left this turn.`);
             }
             combat.moved[token.id] = moved;
           }
         }
+        if (combat && combat.round > 0 && !combat.used[token.id]?.disengage) this.opportunityAlerts(room, token, spot);
         token.x = spot.x;
         token.y = spot.y;
         return this.commit(room);
@@ -389,6 +398,7 @@ export class GameRoom extends DurableObject<Env> {
         requireRole(me, 'dm');
         const token = room.tokens[msg.tokenId];
         if (!token) throw new GameError('Token not found.');
+        if (token.concentration) endConcentration(room, token);
         delete room.tokens[token.id];
         if (room.highlight?.tokenId === token.id) room.highlight = null;
         if (room.combat) removeFromCombat(room.combat, token.id);
@@ -581,9 +591,98 @@ export class GameRoom extends DurableObject<Env> {
         const token = room.tokens[msg.tokenId];
         if (!combat || !token) throw new GameError('Not in a fight.');
         if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
-        if (!['action', 'bonus', 'reaction', 'dash'].includes(msg.what)) throw new GameError('Unknown.');
+        if (!['action', 'bonus', 'reaction', 'dash', 'disengage', 'dodge', 'sneak'].includes(msg.what)) throw new GameError('Unknown.');
         combat.used[token.id] = { ...(combat.used[token.id] ?? {}), [msg.what]: !!msg.value };
         return this.commit(room);
+      }
+
+      case 'combat:rage': {
+        const token = room.tokens[msg.tokenId];
+        if (!token) throw new GameError('Token not found.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
+        token.raging = !!msg.on;
+        return this.commit(room);
+      }
+
+      case 'token:exhaustion': {
+        const token = room.tokens[msg.tokenId];
+        if (!token) throw new GameError('Token not found.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
+        token.exhaustion = Math.round(num(msg.level, 0, 6));
+        token.conditions = (token.conditions ?? []).filter((c) => c !== 'exhaustion');
+        if (token.exhaustion > 0) addCondition(token, 'exhaustion');
+        if (token.exhaustion >= 6) addCondition(token, 'dead');
+        return this.commit(room);
+      }
+
+      case 'combat:concentrate': {
+        const token = room.tokens[msg.tokenId];
+        if (!token) throw new GameError('Token not found.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
+        const old = token.concentration;
+        if (old) endConcentration(room, token);
+        if (msg.spell) token.concentration = { spell: cleanTitle(msg.spell), ...(msg.areaId ? { areaId: String(msg.areaId) } : {}) };
+        if (old && msg.spell) this.notify(room, `${token.name} stops concentrating on ${old.spell}.`);
+        return this.commit(room);
+      }
+
+      case 'combat:deathsave': {
+        const token = room.tokens[msg.tokenId];
+        const c = token?.characterId ? room.characters[token.characterId] : undefined;
+        if (!token || !c) throw new GameError('Only characters roll death saves.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
+        if (c.hp.current > 0) throw new GameError('Only at 0 hit points.');
+        const d20 = randomInt(20);
+        let note: string;
+        if (d20 === 20) {
+          c.hp.current = 1;
+          c.deathSaves = { successes: 0, failures: 0 };
+          token.conditions = (token.conditions ?? []).filter((x) => x !== 'unconscious' && x !== 'stable');
+          note = 'natural 20: back up with 1 HP!';
+        } else if (d20 === 1) {
+          c.deathSaves.failures = Math.min(3, c.deathSaves.failures + 2);
+          note = 'natural 1: two failures';
+        } else if (d20 >= 10) {
+          c.deathSaves.successes = Math.min(3, c.deathSaves.successes + 1);
+          note = 'success';
+        } else {
+          c.deathSaves.failures = Math.min(3, c.deathSaves.failures + 1);
+          note = 'failure';
+        }
+        if (c.deathSaves.successes >= 3) {
+          addCondition(token, 'stable');
+          note += ' · stable';
+        }
+        if (c.deathSaves.failures >= 3) {
+          addCondition(token, 'dead');
+          note += ' · dead';
+        }
+        const roll = this.recordRoll(room, {
+          id: crypto.randomUUID(), byId: token.ownerId ?? me!.id, byName: token.name, label: `${token.name}: Death saving throw`,
+          groups: [{ sides: 20, rolls: [d20], kept: [d20], total: d20 }], modifier: 0, total: d20, at: Date.now(),
+          outcomes: [{ target: token.name, result: d20 >= 10 ? 'saved' : 'failed', damage: 0, note: `${note} (${c.deathSaves.successes}✓ ${c.deathSaves.failures}✗)` }],
+        });
+        await this.commit(room);
+        return { roll } satisfies Requests['combat:deathsave']['result'];
+      }
+
+      case 'combat:heal': {
+        const target = room.tokens[msg.targetId];
+        const healer = msg.healerId ? room.tokens[msg.healerId] : null;
+        if (!target) throw new GameError('Token not found.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && healer?.ownerId === me.id)) throw new GameError('Not allowed.');
+        const dice = diceList(msg.dice);
+        const rolls = dice.flatMap((g) => Array.from({ length: g.count }, () => randomInt(g.sides)));
+        const total = Math.max(0, rolls.reduce((a, b) => a + b, 0) + Math.round(num(msg.bonus, -10, 50)));
+        heal(room, target, total);
+        const roll = this.recordRoll(room, {
+          id: crypto.randomUUID(), byId: me!.id, byName: healer?.name ?? me!.name,
+          label: `${healer ? `${healer.name} → ` : ''}${target.name}: ${cleanTitle(msg.label) || 'Healing'}`,
+          groups: dice.length ? [{ sides: dice[0].sides, rolls, kept: rolls, total }] : [], modifier: 0, total, at: Date.now(),
+          outcomes: [{ target: target.name, result: 'hit', damage: 0, note: `healed ${total} HP` }],
+        });
+        await this.commit(room);
+        return { roll } satisfies Requests['combat:heal']['result'];
       }
 
       case 'combat:attack': {
@@ -591,28 +690,39 @@ export class GameRoom extends DurableObject<Env> {
         const target = room.tokens[msg.targetId];
         if (!attacker || !target) throw new GameError('Token not found.');
         if (me?.role !== 'dm' && !(me?.role === 'player' && attacker.ownerId === me.id)) throw new GameError('You can only attack with your own character.');
-        const toHit = Math.round(num(msg.toHit, -10, 40));
-        const d20 = randomInt(20);
+        const melee = !!msg.melee;
+        const adv = attackAdvantage(room, attacker, target, melee, msg.advantage ?? null);
+        const toHit = Math.round(num(msg.toHit, -10, 40)) - exhaustionPenalty(attacker);
+        const d1 = randomInt(20);
+        const d2 = adv.mode ? randomInt(20) : d1;
+        const d20 = adv.mode === 'adv' ? Math.max(d1, d2) : adv.mode === 'dis' ? Math.min(d1, d2) : d1;
         const ac = acOf(room, target);
-        const crit = d20 === 20;
-        const hit = crit || (d20 !== 1 && d20 + toHit >= ac);
+        const hit = d20 === 20 || (d20 !== 1 && d20 + toHit >= ac);
+        // Hits on a paralyzed or unconscious creature from within 5 ft are critical.
+        const crit = hit && (d20 === 20 || (melee && hasCondition(target, 'paralyzed', 'unconscious')));
         const outcome: RollOutcome = { target: target.name, result: crit ? 'crit' : hit ? 'hit' : 'miss', damage: 0 };
-        const groups = [{ sides: 20, rolls: [d20], kept: [d20], total: d20 }];
+        const groups = [{ sides: 20, rolls: adv.mode ? [d1, d2] : [d1], kept: [d20], total: d20 }];
+        const notes: string[] = adv.reasons.length ? [`${adv.mode === 'adv' ? 'advantage' : adv.mode === 'dis' ? 'disadvantage' : 'cancelled out'}: ${adv.reasons.join(', ')}`] : [];
         if (hit) {
+          const combat = room.combat;
+          const sneak = msg.sneakAttack && !(combat?.used[attacker.id]?.sneak) ? diceList([msg.sneakAttack]) : [];
+          if (sneak.length && combat) combat.used[attacker.id] = { ...(combat.used[attacker.id] ?? {}), sneak: true };
           const parts = [
             { dice: diceList(msg.damage), bonus: Math.round(num(msg.damageBonus, -20, 50)), type: String(msg.damageType ?? '') },
             ...(Array.isArray(msg.extra) ? msg.extra.slice(0, 4) : []).map((x) => ({ dice: diceList([x]), bonus: 0, type: String(x?.type ?? '') })),
+            ...(sneak.length ? [{ dice: sneak, bonus: 0, type: String(msg.damageType ?? '') }] : []),
           ];
-          const notes: string[] = [];
+          if (sneak.length) notes.push('Sneak Attack');
           for (const p of parts) {
             const rolls = p.dice.flatMap((g) => Array.from({ length: g.count * (crit ? 2 : 1) }, () => randomInt(g.sides)));
             const amount = Math.max(0, rolls.reduce((a, b) => a + b, 0) + p.bonus);
-            const dealt = applyDamage(room, target, amount, p.type);
+            const dealt = this.damage(room, target, amount, p.type, crit);
             outcome.damage += dealt.dealt;
             if (dealt.note) notes.push(dealt.note);
           }
-          if (notes.length) outcome.note = [...new Set(notes)].join(', ');
+          if (msg.concentration) this.concentrate(room, attacker, cleanTitle(msg.concentration));
         }
+        if (notes.length) outcome.note = [...new Set(notes)].join(', ');
         const roll = this.recordRoll(room, {
           id: crypto.randomUUID(), byId: me!.id, byName: attacker.name,
           label: `${attacker.name} → ${target.name}: ${cleanTitle(msg.label) || 'attack'} (AC ${ac})`,
@@ -631,16 +741,28 @@ export class GameRoom extends DurableObject<Env> {
         const dice = diceList(msg.damage);
         const damageRolls = dice.flatMap((g) => Array.from({ length: g.count }, () => randomInt(g.sides)));
         const total = Math.max(0, damageRolls.reduce((a, b) => a + b, 0) + Math.round(num(msg.damageBonus, -20, 50)));
+        const condition = typeof msg.condition === 'string' ? msg.condition.slice(0, 30) : '';
+        const applied: { tokenId: string; condition: string }[] = [];
         const outcomes: RollOutcome[] = [];
         for (const id of (Array.isArray(msg.targetIds) ? msg.targetIds : []).slice(0, 30)) {
           const target = room.tokens[id];
           if (!target) continue;
-          const roll = randomInt(20) + saveOf(room, target, ability);
-          const saved = roll >= dc;
+          const r = rollSave(room, target, ability);
+          const saved = r.total >= dc && !r.autoFail;
           const amount = saved ? (msg.half ? Math.floor(total / 2) : 0) : total;
-          const dealt = amount > 0 ? applyDamage(room, target, amount, String(msg.damageType ?? '')) : { dealt: 0, note: '' };
-          outcomes.push({ target: target.name, result: saved ? 'saved' : 'failed', damage: dealt.dealt, note: [`rolled ${roll}`, dealt.note].filter(Boolean).join(', ') });
+          const dealt = amount > 0 ? this.damage(room, target, amount, String(msg.damageType ?? ''), false) : { dealt: 0, note: '' };
+          if (!saved && condition) {
+            addCondition(target, condition);
+            applied.push({ tokenId: target.id, condition });
+          }
+          outcomes.push({
+            target: target.name,
+            result: saved ? 'saved' : 'failed',
+            damage: dealt.dealt,
+            note: [r.autoFail ? 'fails automatically' : `rolled ${r.total}${r.mode ? ` (${r.mode === 'adv' ? 'advantage' : 'disadvantage'})` : ''}`, !saved && condition ? condition : '', dealt.note].filter(Boolean).join(', '),
+          });
         }
+        if (attacker && msg.concentration) this.concentrate(room, attacker, cleanTitle(msg.concentration), msg.areaId ? String(msg.areaId) : undefined, applied);
         const rollRecord = this.recordRoll(room, {
           id: crypto.randomUUID(), byId: me.id, byName: attacker?.name ?? me.name,
           label: `${attacker ? `${attacker.name}: ` : ''}${cleanTitle(msg.label) || 'Saving throw'} (DC ${dc} ${ability.toUpperCase()})`,
@@ -713,6 +835,7 @@ export class GameRoom extends DurableObject<Env> {
         if (!area) return null;
         if (me?.role !== 'dm' && area.placedBy !== me?.id) throw new GameError('Only the Dungeon Master or the caster can remove this.');
         room.areas = room.areas.filter((x) => x.id !== area.id);
+        for (const t of Object.values(room.tokens)) if (t.concentration?.areaId === area.id) endConcentration(room, t);
         return this.commit(room);
       }
 
@@ -901,6 +1024,52 @@ export class GameRoom extends DurableObject<Env> {
     await this.save();
     this.broadcast(room, except);
     return null;
+  }
+
+  /** Damage plus what follows from it: concentration saves, and death save failures at 0 HP. */
+  private damage(room: StoredRoom, t: Token, amount: number, type: string, crit: boolean) {
+    const c = t.characterId ? room.characters[t.characterId] : undefined;
+    const wasDown = (c?.hp.current ?? t.stats?.hp.current ?? 1) <= 0;
+    const dealt = applyDamage(room, t, amount, type);
+    const notes = [dealt.note];
+    if (wasDown && c && dealt.dealt > 0) {
+      c.deathSaves.failures = Math.min(3, c.deathSaves.failures + (crit ? 2 : 1));
+      notes.push(`death save failure${crit ? 's' : ''}`);
+      if (c.deathSaves.failures >= 3) addCondition(t, 'dead');
+    }
+    if (t.concentration && dealt.dealt > 0) {
+      const hp = hpOf(room, t);
+      const dc = Math.min(30, Math.max(10, Math.floor(dealt.dealt / 2)));
+      const r = rollSave(room, t, 'con');
+      if ((hp && hp.current <= 0) || r.autoFail || r.total < dc) {
+        notes.push(`lost concentration on ${t.concentration.spell}`);
+        endConcentration(room, t);
+      } else notes.push(`kept concentration (${r.total} vs DC ${dc})`);
+    }
+    return { dealt: dealt.dealt, note: notes.filter(Boolean).join(', ') };
+  }
+
+  private concentrate(room: StoredRoom, t: Token, spell: string, areaId?: string, conditions?: { tokenId: string; condition: string }[]) {
+    if (t.concentration) endConcentration(room, t);
+    t.concentration = { spell, ...(areaId ? { areaId } : {}), ...(conditions?.length ? { conditions } : {}) };
+  }
+
+  /** Someone left an enemy's reach without Disengaging: tell whoever controls the enemy. */
+  private opportunityAlerts(room: StoredRoom, mover: Token, to: Point) {
+    const reachUnits = 1 + 0.9; // 5 ft reach, edge to edge
+    for (const other of Object.values(room.tokens)) {
+      if (other.id === mover.id || hasCondition(other, 'unconscious', 'dead', 'incapacitated', 'paralyzed', 'stunned')) continue;
+      const enemies = (mover.kind === 'player') !== (other.kind === 'player') && other.kind !== 'npc' && mover.kind !== 'npc';
+      if (!enemies || room.combat?.used[other.id]?.reaction) continue;
+      if (dist(other, mover) <= reachUnits && dist(other, to) > reachUnits) {
+        const text = `${mover.name} left ${other.name}'s reach: ${other.name} can make an opportunity attack (uses its reaction).`;
+        const controllers = other.ownerId ? [other.ownerId] : Object.values(room.members).filter((m) => m.role === 'dm').map((m) => m.id);
+        for (const s of this.ctx.getWebSockets()) {
+          const { clientId } = s.deserializeAttachment() as Attachment;
+          if (controllers.includes(clientId)) send(s, { type: 'notice', text });
+        }
+      }
+    }
   }
 
   /** Keeps a roll in the game's roll history and shows it on every screen. */
@@ -1403,7 +1572,7 @@ function applyDamage(room: StoredRoom, t: Token, amount: number, type: string): 
   if (has(t.stats?.immunities)) {
     dealt = 0;
     note = 'immune';
-  } else if (has(c?.summary.resistances) || has(t.stats?.resistances)) {
+  } else if (has(c?.summary.resistances) || has(t.stats?.resistances) || (t.raging && ['bludgeoning', 'piercing', 'slashing'].includes(lower))) {
     dealt = Math.floor(amount / 2);
     note = 'resisted';
   } else if (has(t.stats?.vulnerabilities)) {
@@ -1417,6 +1586,7 @@ function applyDamage(room: StoredRoom, t: Token, amount: number, type: string): 
   hp.current = Math.max(0, hp.current - (dealt - fromTemp));
   if (hp.current === 0) {
     addCondition(t, 'unconscious');
+    t.raging = false;
     note = [note, 'down!'].filter(Boolean).join(', ');
   }
   return { dealt, note };
@@ -1481,4 +1651,57 @@ function sanitizeStats(raw: TokenStats): TokenStats {
     vulnerabilities: list(raw?.vulnerabilities),
     ...(typeof raw?.monster === 'string' ? { monster: raw.monster.slice(0, 60) } : {}),
   };
+}
+
+// ---------- conditions in combat ----------
+
+function hasCondition(t: Token, ...names: string[]) {
+  return (t.conditions ?? []).some((c) => names.includes(c));
+}
+
+function exhaustionPenalty(t: Token) {
+  return 2 * (t.exhaustion ?? (hasCondition(t, 'exhaustion') ? 1 : 0));
+}
+
+/** Advantage or disadvantage on an attack, from the choice made and both creatures' conditions. */
+function attackAdvantage(room: StoredRoom, attacker: Token, target: Token, melee: boolean, chosen: 'adv' | 'dis' | null) {
+  const adv: string[] = [];
+  const dis: string[] = [];
+  if (chosen === 'adv') adv.push('chosen');
+  if (chosen === 'dis') dis.push('chosen');
+  if (hasCondition(attacker, 'blinded')) dis.push('blinded');
+  if (hasCondition(attacker, 'poisoned')) dis.push('poisoned');
+  if (hasCondition(attacker, 'prone')) dis.push('prone');
+  if (hasCondition(attacker, 'restrained')) dis.push('restrained');
+  if (hasCondition(attacker, 'frightened')) dis.push('frightened');
+  if (hasCondition(attacker, 'invisible')) adv.push('unseen attacker');
+  if (hasCondition(target, 'blinded')) adv.push('target blinded');
+  if (hasCondition(target, 'paralyzed', 'stunned', 'unconscious', 'petrified', 'restrained')) adv.push(`target ${(target.conditions ?? []).find((c) => ['paralyzed', 'stunned', 'unconscious', 'petrified', 'restrained'].includes(c))}`);
+  if (hasCondition(target, 'prone')) (melee ? adv : dis).push(melee ? 'target prone' : 'target prone (ranged)');
+  if (hasCondition(target, 'invisible')) dis.push('target invisible');
+  if (room.combat?.used[target.id]?.dodge) dis.push('target dodging');
+  const mode: 'adv' | 'dis' | null = adv.length && !dis.length ? 'adv' : dis.length && !adv.length ? 'dis' : null;
+  return { mode, reasons: [...adv, ...dis] };
+}
+
+/** A saving throw with its conditions: Paralyzed etc. fail STR/DEX saves; Restrained has disadvantage on DEX. */
+function rollSave(room: StoredRoom, t: Token, ability: (typeof ABILITY_KEYS)[number]) {
+  const autoFail = (ability === 'str' || ability === 'dex') && hasCondition(t, 'paralyzed', 'stunned', 'unconscious', 'petrified');
+  const mode: 'adv' | 'dis' | null = ability === 'dex' && hasCondition(t, 'restrained') ? 'dis' : room.combat?.used[t.id]?.dodge && ability === 'dex' ? 'adv' : null;
+  const d1 = randomInt(20);
+  const d2 = mode ? randomInt(20) : d1;
+  const d20 = mode === 'adv' ? Math.max(d1, d2) : mode === 'dis' ? Math.min(d1, d2) : d1;
+  return { total: d20 + saveOf(room, t, ability) - exhaustionPenalty(t), autoFail, mode };
+}
+
+/** Ends a creature's concentration: its spell area disappears and the conditions it caused end. */
+function endConcentration(room: StoredRoom, t: Token) {
+  const conc = t.concentration;
+  if (!conc) return;
+  if (conc.areaId) room.areas = room.areas.filter((a) => a.id !== conc.areaId);
+  for (const { tokenId, condition } of conc.conditions ?? []) {
+    const other = room.tokens[tokenId];
+    if (other) other.conditions = (other.conditions ?? []).filter((c) => c !== condition);
+  }
+  delete t.concentration;
 }

@@ -99,6 +99,22 @@ export interface RulesSpell {
   attack?: 'melee' | 'ranged';
   damage?: string; // e.g. "1d10 Fire"
   save?: Ability; // the saving throw it asks for
+  upcast?: { count: number; sides: number }; // extra dice per slot level above the spell's level
+  cantripScales?: boolean; // more dice at character levels 5, 11 and 17
+  healing?: string; // e.g. "2d8"
+  condition?: string; // given on a failed save, e.g. "paralyzed"
+}
+
+/** A spell's damage (or healing) dice when cast with a slot of `slotLevel` by a character of `charLevel`. */
+export function spellDiceAt(spell: RulesSpell, slotLevel: number, charLevel: number, which: 'damage' | 'healing' = 'damage'): string {
+  const base = which === 'damage' ? spell.damage : spell.healing;
+  if (!base) return '';
+  const m = base.match(/^(\d+)d(\d+)(.*)$/);
+  if (!m) return base;
+  let count = Number(m[1]);
+  if (spell.level === 0 && spell.cantripScales) count *= charLevel >= 17 ? 4 : charLevel >= 11 ? 3 : charLevel >= 5 ? 2 : 1;
+  if (spell.level > 0 && spell.upcast && slotLevel > spell.level && Number(m[2]) === spell.upcast.sides) count += spell.upcast.count * (slotLevel - spell.level);
+  return `${count}d${m[2]}${m[3]}`;
 }
 
 export type AreaShape = 'sphere' | 'cone' | 'cube' | 'cylinder' | 'emanation' | 'line';

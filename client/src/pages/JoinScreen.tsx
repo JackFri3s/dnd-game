@@ -230,9 +230,11 @@ function PlayerLobby({
       <h3>At the table</h3>
       <MemberList dm={dm} players={others} />
       <div className="row-buttons">
-        <button className="text-button" onClick={onSwitchRole} disabled={!!dm}>
-          {dm ? 'There is already a Dungeon Master' : 'Be the Dungeon Master instead'}
-        </button>
+        {!dm && (
+          <button className="text-button" onClick={onSwitchRole}>
+            Be the Dungeon Master instead
+          </button>
+        )}
         <button className="text-button" onClick={() => store.leave()}>Leave game</button>
       </div>
     </section>
@@ -271,16 +273,8 @@ function DmLobby({
       </div>
 
       <div className="card">
+        <h3 className="step-title"><span className="step-num">1</span> Campaign</h3>
         <CampaignPanel store={store} state={state} />
-        <button
-          className="button primary block"
-          disabled={!state.campaign}
-          onClick={() => run(store.request('game:phase', { phase: 'playing' }))}
-          data-testid="start-campaign"
-        >
-          {state.campaign ? `Start ${state.campaign.name}` : 'Choose a campaign to start'}
-        </button>
-        <p className="hint">Players can still join after the start: the join code stays visible on the Main Screen.</p>
       </div>
 
       {state.campaign && (
@@ -293,12 +287,12 @@ function DmLobby({
       {state.campaign && <CustomContentCard store={store} state={state} />}
 
       <div className="card">
-        <h3>Main Screen size</h3>
+        <h3 className="step-title"><span className="step-num">2</span> Main Screen size</h3>
         <CalibrationControls store={store} table={state.table} />
       </div>
 
       <div className="card">
-        <h3>Players ({players.length})</h3>
+        <h3 className="step-title"><span className="step-num">3</span> Players ({players.length})</h3>
         {players.length === 0 && <p className="hint">Players join by scanning the QR code on the Main Screen.</p>}
         <ul className="list">
           {players.map((p) => (
@@ -312,6 +306,17 @@ function DmLobby({
             </li>
           ))}
         </ul>
+      </div>
+      <div className="card start-card">
+        <button
+          className="button primary block big"
+          disabled={!state.campaign}
+          onClick={() => run(store.request('game:phase', { phase: 'playing' }))}
+          data-testid="start-campaign"
+        >
+          {state.campaign ? `▶ Start ${state.campaign.name}` : 'Choose a campaign first (step 1)'}
+        </button>
+        <p className="hint">Players can still join after the start: the join code stays visible on the Main Screen.</p>
       </div>
       {error && <p className="error">{error}</p>}
       <div className="row-buttons">

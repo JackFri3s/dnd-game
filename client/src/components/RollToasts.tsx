@@ -42,7 +42,7 @@ export function RollToasts({ state }: { state: RoomState }) {
                 data-testid="table-roll"
               >
                 <div className="hint">{r.label}</div>
-                {r.groups.length > 1 ? (
+                {r.groups.length === 0 ? null : r.groups.length > 1 ? (
                   <div className="roll-sets">
                     {r.groups.map((g, i) => (
                       <span key={i}>

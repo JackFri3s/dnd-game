@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SEATS, type Area, type RoomState, type Token } from '../../../shared/protocol.ts';
+import { SEATS, type Area, type Highlight, type RoomState, type Token } from '../../../shared/protocol.ts';
 import {
   MIN_TOKEN_GAP,
   TOKEN_RADIUS,
@@ -47,9 +47,19 @@ interface Props {
   currentTokenId?: string | null;
   /** DM: show monsters' hit points under their tokens. */
   showHp?: boolean;
+  /** A range shown only on this screen (dashed), before it is shown on the table. */
+  localHighlight?: Highlight | null;
 }
 
 const MIN_SCALE = 8;
+
+// Paper textures (drawn by the browser from SVG noise) for the parchment style.
+const GRAIN = `data:image/svg+xml;utf8,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.36 0 0 0 0 0.26 0 0 0 0 0.13 0 0 0 0.2 0'/></filter><rect width='256' height='256' filter='url(#g)'/></svg>",
+)}`;
+const STAINS = `data:image/svg+xml;utf8,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='768' height='768'><filter id='s'><feTurbulence type='fractalNoise' baseFrequency='0.005' numOctaves='4' seed='5' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.36 0 0 0 0 0.16 0 0 0 0.6 -0.25'/></filter><rect width='768' height='768' filter='url(#s)'/></svg>",
+)}`;
 const MAX_SCALE = 220;
 
 /** Draws the (gridless) map with its tokens. Used on the Main Screen, phones and the DM device. */
@@ -68,6 +78,7 @@ export function MapBoard({
   movedFt,
   currentTokenId,
   showHp,
+  localHighlight,
 }: Props) {
   const { unit } = useSettings();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -107,19 +118,19 @@ export function MapBoard({
   };
   const posOf = (t: Token): Point => pending[t.id] ?? t;
 
-  // ---- movement / range highlight: circles around the token ----
-  const hToken = state.highlight && state.tokens.find((t) => t.id === state.highlight!.tokenId);
-  const highlight = (() => {
-    const h = state.highlight;
-    if (!h || !hToken) return null;
-    const at = posOf(hToken);
-    if (h.kind === 'move') {
-      const left = Math.max(0, h.feet - (movedFt?.(hToken) ?? 0));
-      return { at, near: toUnits(left), far: 0 };
-    }
+  // ---- movement / range highlights: circles around the token ----
+  const circlesFor = (h: Highlight | null | undefined) => {
+    const t = h && state.tokens.find((x) => x.id === h.tokenId);
+    if (!h || !t) return null;
+    const at = posOf(t);
+    if (h.kind === 'move') return { kind: h.kind, at, near: toUnits(Math.max(0, h.feet - (movedFt?.(t) ?? 0))), far: 0 };
     // Ranges count from the edge of the creature's space.
-    return { at, near: TOKEN_RADIUS + toUnits(h.feet), far: h.longFeet ? TOKEN_RADIUS + toUnits(h.longFeet) : 0 };
-  })();
+    return { kind: h.kind, at, near: TOKEN_RADIUS + toUnits(h.feet), far: h.longFeet ? TOKEN_RADIUS + toUnits(h.longFeet) : 0 };
+  };
+  const highlight = circlesFor(state.highlight);
+  const sameAsShared =
+    !!localHighlight && !!state.highlight && localHighlight.tokenId === state.highlight.tokenId && localHighlight.kind === state.highlight.kind && localHighlight.feet === state.highlight.feet;
+  const local = sameAsShared ? null : circlesFor(localHighlight);
 
   // ---- spell areas, and the one being aimed ----
   const areaShapes = useMemo(
@@ -243,13 +254,39 @@ export function MapBoard({
       onWheel={onWheel}
     >
       <g transform={transform}>
+        <defs>
+          {/* Parchment style: paper grain and stains that move and zoom with the map */}
+          <pattern id="board-grain" patternUnits="userSpaceOnUse" width={4} height={4}>
+            <image href={GRAIN} width={4} height={4} />
+          </pattern>
+          <pattern id="board-stains" patternUnits="userSpaceOnUse" width={24} height={24}>
+            <image href={STAINS} width={24} height={24} />
+          </pattern>
+          <radialGradient id="board-vignette" cx="50%" cy="50%" r="70%">
+            <stop offset="70%" stopColor="rgb(110,75,30)" stopOpacity={0} />
+            <stop offset="100%" stopColor="rgb(110,75,30)" stopOpacity={0.28} />
+          </radialGradient>
+        </defs>
         <rect className="board-bg" x={0} y={0} width={state.board.w} height={state.board.h} rx={0.2} />
+        <rect className="board-tex" x={0} y={0} width={state.board.w} height={state.board.h} fill="url(#board-stains)" />
+        <rect className="board-tex" x={0} y={0} width={state.board.w} height={state.board.h} fill="url(#board-grain)" />
+        <rect className="board-vignette" x={0} y={0} width={state.board.w} height={state.board.h} fill="url(#board-vignette)" />
 
-        {highlight && highlight.far > highlight.near && (
-          <circle className={`highlight ${state.highlight!.kind} far`} cx={highlight.at.x} cy={highlight.at.y} r={highlight.far} strokeWidth={1.5 * px} />
-        )}
-        {highlight && (
-          <circle className={`highlight ${state.highlight!.kind}`} cx={highlight.at.x} cy={highlight.at.y} r={Math.max(highlight.near, 0.01)} strokeWidth={2 * px} data-testid="highlight" />
+        {[highlight, local].map((h, i) =>
+          h ? (
+            <g key={i} className={i === 1 ? 'local-highlight' : ''}>
+              {h.far > h.near && <circle className={`highlight ${h.kind} far`} cx={h.at.x} cy={h.at.y} r={h.far} strokeWidth={1.5 * px} />}
+              <circle
+                className={`highlight ${h.kind}`}
+                cx={h.at.x}
+                cy={h.at.y}
+                r={Math.max(h.near, 0.01)}
+                strokeWidth={2 * px}
+                strokeDasharray={i === 1 ? `${8 * px} ${6 * px}` : undefined}
+                data-testid={i === 1 ? 'local-highlight' : 'highlight'}
+              />
+            </g>
+          ) : null,
         )}
         {areaShapes.map(({ area, d }) => (
           <path key={area.id} className="area" d={d} strokeWidth={1.5 * px} data-testid={`area-${area.label}`} />

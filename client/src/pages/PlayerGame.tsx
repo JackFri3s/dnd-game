@@ -4,7 +4,7 @@ import type { GameStore } from '../game.ts';
 import { nextPanelSide, usePanelSide } from '../settings.ts';
 import { SIDE_ICON } from '../seats.ts';
 import { MapBoard, type Camera } from '../components/MapBoard.tsx';
-import { ActionPanel, AimBar, useAim } from '../components/Actions.tsx';
+import { ActionPanel, AimBar, useAim, useLocalHighlight } from '../components/Actions.tsx';
 import { CombatBar, RollResult, TargetBar, combatInfo, useTargeting } from '../components/Combat.tsx';
 import { useRules } from '../rules/index.ts';
 import { CharacterScreen } from '../characters/CharacterScreen.tsx';
@@ -31,12 +31,12 @@ export function PlayerGame({
   const [showCharacter, setShowCharacter] = useState(false);
   const myCharacter = state.characters.find((c) => c.ownerId === me.id) ?? null;
   const rules = useRules(state.homebrew);
-  const aimState = useAim(store, state);
-  const targeting = useTargeting(store, state);
+  const highlight = useLocalHighlight();
+  const aimState = useAim(store, state, highlight);
+  const targeting = useTargeting(store, state, highlight);
   const { current, movedFt } = combatInfo(state);
   const [error, setError] = useState<string | null>(null);
   const run = (p: Promise<unknown>) => p.then(() => setError(null), (e: Error) => setError(e.message));
-
   const dm = state.members.find((m) => m.role === 'dm');
 
   return (
@@ -45,70 +45,75 @@ export function PlayerGame({
         <span className="badge-dot big" style={{ background: me.color }} />
         <strong className="grow">{myCharacter?.name ?? me.name}</strong>
         <button className="button small" onClick={() => setShowCharacter(true)} data-testid="open-character">
-          {myCharacter ? 'Character' : 'Create character'}
+          {myCharacter ? 'Sheet' : 'Create character'}
         </button>
-        <button className="button small" onClick={() => myToken && setCamera({ ...camera, ...{ x: myToken.x, y: myToken.y } })}>
-          Find me
+        <button className="icon-btn" onClick={() => myToken && setCamera({ ...camera, x: myToken.x, y: myToken.y })} aria-label="Find me" title="Find me">
+          ◎
         </button>
-        <button className="button small" onClick={() => nextPanelSide(side)} aria-label="Move the controls" title="Move the controls to another side">
+        <button className="icon-btn" onClick={() => nextPanelSide(side)} aria-label="Move the controls" title="Move the controls to another side">
           {SIDE_ICON[side]}
         </button>
-        <button className="button small" onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu">☰</button>
+        <button className={`icon-btn ${menu ? 'on' : ''}`} onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu">
+          ☰
+        </button>
       </header>
       {menu && (
         <div className="game-menu">
           <p className="hint">
             {state.campaign?.name} · game {state.code} · DM: {dm?.name ?? 'none yet'}
           </p>
-          {!dm && <button className="text-button" onClick={onSwitchRole}>Be the Dungeon Master instead</button>}
-          <a className="text-button" href="/settings">Settings</a>
-          <button className="text-button" onClick={() => store.leave()}>Leave game</button>
+          <div className="button-row">
+            <a className="button" href="/settings">Settings</a>
+            {!dm && <button className="button" onClick={onSwitchRole}>Be the Dungeon Master</button>}
+            <button className="button danger" onClick={() => store.leave()}>Leave game</button>
+          </div>
         </div>
       )}
       <RollResult roll={targeting.result} onClose={targeting.clearResult} />
       {showCharacter && <CharacterScreen store={store} character={myCharacter} editable onClose={() => setShowCharacter(false)} />}
       <div className="game-body">
-      <div className="game-board">
-        <MapBoard
-          state={state}
-          camera={camera}
-          onCameraChange={setCamera}
-          canDrag={(t) => t.ownerId === me.id}
-          onMoveToken={(token, to) => run(store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }))}
-          selectedTokenId={myToken?.id}
-          onTapMap={aimState.aim ? aimState.tapMap : targeting.pending ? targeting.tap : undefined}
-          areaPreview={aimState.preview}
-          movedFt={movedFt}
-          currentTokenId={current?.id ?? null}
-        />
-      </div>
-      <footer className="game-controls">
-        {error && <p className="error">{error}</p>}
-        <CombatBar store={store} state={state} token={myToken} />
-        {myToken ? (
-          targeting.pending ? (
+        <div className="game-board">
+          <MapBoard
+            state={state}
+            camera={camera}
+            onCameraChange={setCamera}
+            canDrag={(t) => t.ownerId === me.id}
+            onMoveToken={(token, to) => run(store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }))}
+            selectedTokenId={myToken?.id}
+            onTapMap={aimState.aim ? aimState.tapMap : targeting.pending ? targeting.tap : undefined}
+            areaPreview={aimState.preview}
+            movedFt={movedFt}
+            currentTokenId={current?.id ?? null}
+            localHighlight={highlight.local}
+          />
+        </div>
+        <footer className="game-controls">
+          {error && (
+            <p className="error" onClick={() => setError(null)}>
+              {error}
+            </p>
+          )}
+          <CombatBar store={store} state={state} token={myToken} />
+          {!myToken ? (
+            <p className="hint">Your token will appear when the Dungeon Master starts the game.</p>
+          ) : targeting.pending ? (
             <TargetBar targeting={targeting} />
           ) : aimState.aim ? (
             <AimBar aimState={aimState} character={myCharacter} rules={rules} />
           ) : (
-            <>
-              <p className="hint">Drag your token to move it. Tap to show on every screen:</p>
-              <ActionPanel
-                store={store}
-                state={state}
-                token={myToken}
-                character={myCharacter}
-                rules={rules}
-                aimState={aimState}
-                canRemoveArea={(a) => a.placedBy === me.id}
-                targeting={targeting}
-              />
-            </>
-          )
-        ) : (
-          <p className="hint">Your token will appear when the Dungeon Master places it.</p>
-        )}
-      </footer>
+            <ActionPanel
+              store={store}
+              state={state}
+              token={myToken}
+              character={myCharacter}
+              rules={rules}
+              aimState={aimState}
+              canRemoveArea={(a) => a.placedBy === me.id}
+              targeting={targeting}
+              highlight={highlight}
+            />
+          )}
+        </footer>
       </div>
     </div>
   );
