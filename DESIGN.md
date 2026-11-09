@@ -208,11 +208,10 @@ Inspired by **Watabou's generators** (Medieval Fantasy City Generator, village a
 
 Decided in v0.2: 2024 rules ✔ · name "dnd" for now ✔ · players sit all around the screen ✔ · Watabou-inspired style ✔
 
-Decided in v0.3: square rooms and free shapes on the hex grid ✔ · fog of war is a DM option ✔ · DM can steer generation with story context ✔ · character creation on any device, import or guided ✔
+Decided in v0.3: AI text generation off for now (maybe later, as an option) ✔ · square rooms and free shapes on the hex grid ✔ · fog of war is a DM option ✔ · DM can steer generation with story context ✔ · character creation on any device, import or guided ✔
 
 Still open:
 1. **Large creatures on hexes:** footprint shapes for Large/Huge/Gargantuan. To decide when building tokens; it depends on creature size.
-2. **AI text generation** for DM-guided generation: wanted later, or keep it to built-in tables only?
 
 ## 12. Build order (milestones)
 
