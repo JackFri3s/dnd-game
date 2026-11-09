@@ -6,8 +6,9 @@ import { useRules } from '../rules/index.ts';
 import { CharacterSheet } from './CharacterSheet.tsx';
 import { CharacterBuilder } from './CharacterBuilder.tsx';
 import { CharacterEditor } from './CharacterEditor.tsx';
+import { QuickRoll } from './QuickRoll.tsx';
 
-type Mode = 'sheet' | 'choose' | 'builder' | 'editor';
+type Mode = 'sheet' | 'choose' | 'builder' | 'editor' | 'quick';
 
 /**
  * Everything about one character, as a full-screen panel: create one (guided or
@@ -57,9 +58,11 @@ export function CharacterScreen({
     <div className="overlay" role="dialog" aria-modal="true">
       <div className="overlay-inner">
         {mode === 'sheet' && (
-          <button className="text-button close" onClick={onClose}>
-            Close
-          </button>
+          <header className="builder-head">
+            <button className="text-button" onClick={onClose}>
+              ← Close
+            </button>
+          </header>
         )}
         {!rules ? (
           <p className="hint">Loading the rules…</p>
@@ -69,6 +72,10 @@ export function CharacterScreen({
               <button className="text-button" onClick={onClose}>← Back</button>
             </header>
             <h2>New character</h2>
+            <button className="choice" onClick={() => setMode('quick')} data-testid="choose-quick">
+              <strong>Roll me a character</strong>
+              <span className="hint">A few questions (or none), real dice, and a ready level-1 character. Keep it or roll again.</span>
+            </button>
             <button className="choice" onClick={() => setMode('builder')} data-testid="choose-builder">
               <strong>Create one step by step</strong>
               <span className="hint">Choose a class, origin and abilities (roll dice or use the standard numbers). The app does the maths.</span>
@@ -78,6 +85,8 @@ export function CharacterScreen({
               <span className="hint">Already have a character on paper or in another app? Fill it in here.</span>
             </button>
           </div>
+        ) : mode === 'quick' ? (
+          <QuickRoll rules={rules} rollDice={(label, groups) => rollDice(label, groups)} onSave={saveAndShow} onCancel={() => setMode('choose')} />
         ) : mode === 'builder' ? (
           <CharacterBuilder rules={rules} rollDice={(label, groups) => rollDice(label, groups)} onSave={saveAndShow} onCancel={() => (character ? setMode('sheet') : setMode('choose'))} />
         ) : mode === 'editor' ? (
@@ -98,7 +107,7 @@ export function CharacterScreen({
               onEdit={() => setMode('editor')}
               onRoll={
                 editable
-                  ? (label, modifier) => rollDice(label, [{ count: 1, sides: 20 }], modifier).then(setLastRoll, () => {})
+                  ? (label, modifier, dice) => rollDice(label, dice?.length ? dice : [{ count: 1, sides: 20 }], modifier).then(setLastRoll, () => {})
                   : undefined
               }
             />
@@ -106,7 +115,7 @@ export function CharacterScreen({
               <div className="roll-toast" onClick={() => setLastRoll(null)} data-testid="roll-result">
                 <strong>{lastRoll.total}</strong>
                 <span>
-                  {lastRoll.label.replace(/^.*?: /, '')} · d20 {lastRoll.groups[0].rolls[0]}
+                  {lastRoll.label.replace(/^.*?: /, '')} · {lastRoll.groups.map((g) => `${g.rolls.length}d${g.sides} (${g.rolls.join(', ')})`).join(' + ')}
                   {lastRoll.modifier ? ` ${lastRoll.modifier > 0 ? '+' : '−'} ${Math.abs(lastRoll.modifier)}` : ''}
                 </span>
               </div>

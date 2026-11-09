@@ -94,6 +94,8 @@ export interface RulesSpell {
   rangeFt: number | null; // 0 = self, 5 = touch, null = special
   area?: { shape: AreaShape; size: number; width?: number };
   attack?: 'melee' | 'ranged';
+  damage?: string; // e.g. "1d10 Fire"
+  save?: Ability; // the saving throw it asks for
 }
 
 export type AreaShape = 'sphere' | 'cone' | 'cube' | 'cylinder' | 'emanation' | 'line';
@@ -151,6 +153,12 @@ export interface Character {
   cantrips: string[]; // spell indexes
   spells: string[]; // prepared spell indexes (level 1+)
   hp: { max: number; current: number; temp: number };
+  xp: number;
+  inspiration: boolean; // Heroic Inspiration
+  hitDiceSpent: number;
+  deathSaves: { successes: number; failures: number };
+  /** Limited-use features, e.g. "Second Wind 1/1" or "Rage 2/2". */
+  trackers: { name: string; max: number; used: number }[];
   spellSlotsUsed: number[]; // per spell level 1..9
   /** Numbers the player set by hand instead of the calculated ones. */
   overrides: { ac?: number; speed?: number };
@@ -228,7 +236,12 @@ export function derive(c: Character, rules: RulesData) {
         name: item.name,
         toHit: mods[ability] + prof, // all classes in the SRD are proficient with Simple weapons; good enough for a sheet
         damage: `${w.damage}${mods[ability] ? signed(mods[ability]) : ''} ${w.type.toLowerCase()}`,
-        range: w.range ? (w.range.long ? `${w.range.normal}/${w.range.long} ft` : `${w.range.normal} ft`) : 'reach 5 ft',
+        range: [
+          w.properties.includes('Reach') ? 'reach 10 ft' : w.ranged ? '' : 'reach 5 ft',
+          w.range?.long ? `${w.ranged ? '' : 'thrown '}${w.range.normal}/${w.range.long} ft` : '',
+        ]
+          .filter(Boolean)
+          .join(', '),
       };
     });
 
@@ -269,6 +282,11 @@ export function emptyCharacter(id = ''): Character {
     cantrips: [],
     spells: [],
     hp: { max: 1, current: 1, temp: 0 },
+    xp: 0,
+    inspiration: false,
+    hitDiceSpent: 0,
+    deathSaves: { successes: 0, failures: 0 },
+    trackers: [],
     spellSlotsUsed: [0, 0, 0, 0, 0, 0, 0, 0, 0],
     overrides: {},
     details: { appearance: '', personality: '', ideals: '', bonds: '', flaws: '', backstory: '' },

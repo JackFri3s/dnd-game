@@ -11,7 +11,6 @@ import {
   withSummary,
   type Ability,
   type Character,
-  type CharacterItem,
   type EquipmentOption,
   type RulesData,
 } from '../../../shared/rules.ts';
@@ -19,6 +18,7 @@ import type { DiceRoll } from '../../../shared/protocol.ts';
 import { CLASS_BLURBS, STANDARD_LANGUAGES, randomName } from '../rules/index.ts';
 import { formatDistance, useSettings } from '../settings.ts';
 import { CharacterSheet } from './CharacterSheet.tsx';
+import { expandEquipment } from './assemble.ts';
 
 type Method = 'roll' | 'array' | 'pointbuy';
 const STEPS = ['Class', 'Origin', 'Abilities', 'Skills', 'Equipment', 'Spells', 'Details', 'Review'] as const;
@@ -98,25 +98,9 @@ export function CharacterBuilder({ rules, rollDice, onSave, onCancel }: Props) {
   // ---- the character being built ----
   const character = ((): Character => {
     const c = emptyCharacter();
-    const items: CharacterItem[] = [];
-    const add = (opt: EquipmentOption | undefined) => {
-      for (const it of opt?.items ?? []) {
-        const r = it.index ? rules.items.find((x) => x.index === it.index) : undefined;
-        if (r?.kind === 'pack' && r.contents) {
-          items.push({ index: r.index, name: r.name, qty: it.qty });
-          for (const inner of r.contents) items.push({ index: inner.index, name: inner.name, qty: inner.qty * it.qty });
-        } else items.push({ ...it });
-      }
-    };
     const cOpt = cls?.equipment.find((o) => o.label === classEquip);
     const bOpt = background?.equipment.find((o) => o.label === bgEquip);
-    add(cOpt);
-    add(bOpt);
-    // Wear the first armour and shield.
-    const firstArmor = items.findIndex((i) => rules.items.find((r) => r.index === i.index)?.kind === 'armor');
-    const firstShield = items.findIndex((i) => rules.items.find((r) => r.index === i.index)?.kind === 'shield');
-    if (firstArmor >= 0) items[firstArmor].equipped = true;
-    if (firstShield >= 0) items[firstShield].equipped = true;
+    const { items, gold } = expandEquipment(rules, [cOpt, bOpt]);
     const hpMax = Math.max(1, (cls?.hitDie ?? 8) + mod(finalScores.con));
     const feats = background ? [background.feat.index] : [];
     return withSummary(
@@ -134,7 +118,7 @@ export function CharacterBuilder({ rules, rollDice, onSave, onCancel }: Props) {
         languages: ['Common', ...languages],
         feats,
         items,
-        gold: (cOpt?.gold ?? 0) + (bOpt?.gold ?? 0),
+        gold,
         cantrips,
         spells,
         hp: { max: hpMax, current: hpMax, temp: 0 },

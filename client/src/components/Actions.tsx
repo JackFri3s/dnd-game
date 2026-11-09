@@ -178,7 +178,7 @@ export function ActionPanel({
           .filter((x) => x.w)
           .map(({ item, w }) => ({
             name: item.name,
-            feet: w!.ranged || (w!.properties.includes('Thrown') && w!.range?.long) ? w!.range?.normal ?? 5 : w!.properties.includes('Reach') ? 10 : 5,
+            feet: w!.ranged || (w!.properties.includes('Thrown') && w!.range?.long) ? (w!.range?.normal ?? 5) : w!.properties.includes('Reach') ? 10 : 5,
             longFeet: w!.ranged || w!.properties.includes('Thrown') ? w!.range?.long : undefined,
             ranged: !!w!.ranged,
           }))

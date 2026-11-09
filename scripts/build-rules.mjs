@@ -52,6 +52,20 @@ function rangeFeet(range = '') {
   return null;
 }
 
+/** Damage at the spell's own level (cantrips: at character level 1), e.g. "8d6 Fire". */
+function spellDamage(s) {
+  const levels = s.damage?.damage_at_slot_level ?? s.damage?.damage_at_character_level;
+  if (!levels) return {};
+  const dice = levels[String(s.level)] ?? levels[Object.keys(levels).sort((a, b) => a - b)[0]];
+  return dice ? { damage: `${dice} ${s.damage.damage_type?.name ?? ''}`.trim() } : {};
+}
+
+/** The saving throw a spell asks for ("makes a Dexterity saving throw" -> "dex"). */
+function spellSave(text = '') {
+  const m = text.match(/(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw/);
+  return m ? { save: m[1].slice(0, 3).toLowerCase() } : {};
+}
+
 /** The spell's area (e.g. "20-foot-radius Sphere"), read from its description. */
 function spellArea(text = '') {
   const t = text.replace(/(\d+)foot/g, '$1-foot').replace(/foothigh/g, 'foot-high');
@@ -166,6 +180,8 @@ const data = {
     rangeFt: rangeFeet(s.range),
     ...(spellArea(s.description) ? { area: spellArea(s.description) } : {}),
     ...(s.attack_type ? { attack: s.attack_type } : {}),
+    ...spellDamage(s),
+    ...spellSave(s.description),
     components: [(s.components ?? []).join(', '), s.material ? `(${s.material})` : ''].filter(Boolean).join(' '),
     duration: s.duration ?? '',
     concentration: !!s.concentration,
@@ -190,6 +206,8 @@ const data = {
         ranged: cats.includes('ranged-weapons'),
       };
       if (e.range?.normal) item.weapon.range = { normal: e.range.normal, ...(e.range.long ? { long: e.range.long } : {}) };
+      // Thrown melee weapons (javelin, dagger, handaxe...): their throwing range.
+      if (e.throw_range?.normal) item.weapon.range = { normal: e.throw_range.normal, ...(e.throw_range.long ? { long: e.throw_range.long } : {}) };
     } else if (e.contents) {
       item.kind = 'pack';
       item.contents = e.contents.map((c) => ({ index: c.item.index, name: c.item.name, qty: c.quantity }));

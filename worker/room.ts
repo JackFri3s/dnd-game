@@ -923,6 +923,15 @@ function sanitizeCharacter(raw: unknown): Character {
     cantrips: strs(c.cantrips, 40),
     spells: strs(c.spells, 100),
     hp: { max: maxHp, current: n(c.hp?.current, -999, 999, maxHp), temp: n(c.hp?.temp, 0, 999, 0) },
+    xp: n(c.xp, 0, 10_000_000, 0),
+    inspiration: !!c.inspiration,
+    hitDiceSpent: n(c.hitDiceSpent, 0, 20, 0),
+    deathSaves: { successes: n(c.deathSaves?.successes, 0, 3, 0), failures: n(c.deathSaves?.failures, 0, 3, 0) },
+    trackers: (Array.isArray(c.trackers) ? c.trackers : []).slice(0, 30).map((t) => ({
+      name: str(t?.name, 60) || 'Feature',
+      max: n(t?.max, 1, 99, 1),
+      used: n(t?.used, 0, 99, 0),
+    })),
     spellSlotsUsed: Array.from({ length: 9 }, (_, i) => n(c.spellSlotsUsed?.[i], 0, 9, 0)),
     overrides: {
       ...(c.overrides?.ac !== undefined ? { ac: n(c.overrides.ac, 0, 40) } : {}),
