@@ -1,6 +1,6 @@
 # Game Design Document
 
-> Working title: **dnd** (personal project, not for sale). Status: draft v0.2 — the agreed concept, before any code.
+> Working title: **dnd** (personal project, not for sale). Status: draft v0.3 — the agreed concept, before any code.
 
 ## 1. The idea in one paragraph
 
@@ -42,7 +42,7 @@ A digital tabletop role-playing game for a group sitting around a real table. A 
 - The map itself has no "up": a compass rose shows north.
 
 ### 3.2 Player device (phone/tablet, one per player)
-- Join with the room code or QR code, then pick or create a character.
+- Join with the room code or QR code, then pick, import or create a character (see §3.4).
 - Character sheet: ability scores, HP, AC, conditions, spells and slots, features, inventory, gold.
 - Action menu: Move, Attack, Cast a Spell, Dash, Dodge, Help, Hide, Use an Object, and so on.
 - A mini-map to move their own token; reachable hexes are highlighted.
@@ -52,11 +52,30 @@ A digital tabletop role-playing game for a group sitting around a real table. A 
 ### 3.3 DM device (tablet/laptop)
 - Sees **everything**: the full map, hidden things, monster stats, notes.
 - Generates, regenerates or edits maps, locations and NPCs.
-- Places, hides and reveals tokens, monsters, traps and treasure; controls the fog of war.
+- Places, hides and reveals tokens, monsters, traps and treasure.
+- **Turns fog of war on or off** per map, and chooses how it works (see §4b).
+- **Steers generation** with their own story context (see §4a).
 - Runs combat: starts and ends encounters, controls monsters, approves or undoes actions.
 - Decides what the Main Screen shows (which map, where the camera points, which areas are revealed).
 - Can override any rule or number (the DM is always right).
 - Save, load and manage campaigns.
+- Can also create characters (pre-made characters for players, or NPCs).
+
+### 3.4 Character creation (on any device: players and DM)
+Characters can be made on **anyone's phone or tablet**, before or during a session, and are saved to that person's account so they can be brought into a campaign.
+
+**Path A: bring an existing character.** Fill in a character you already have (e.g. from a paper sheet): class, level, species, background, ability scores, HP, equipment, spells, and so on. The app checks it against the 2024 rules, warns about anything that doesn't add up (it doesn't block it), and calculates the derived numbers (modifiers, AC, saves, skills, spell save DC).
+
+**Path B: guided builder.** Step by step, following the 2024 Player's Handbook order, with only SRD options built in (plus any homebrew the DM adds):
+1. **Class** (with explanation of what each one plays like).
+2. **Origin:** background (gives ability score increases, an Origin feat, skills, tools and equipment) and species.
+3. **Ability scores:** choose a method: **roll 4d6, drop the lowest** (animated dice; can be shown on the Main Screen so the table can watch), standard array (15, 14, 13, 12, 10, 8), or point buy. Then assign scores to abilities and apply background increases.
+4. **Alignment, languages, equipment** (starting kit or starting gold).
+5. **Spells** for spellcasters.
+6. **Details:** name (with a name generator), appearance, personality, ideals, bonds, flaws, backstory, portrait or token colour and icon.
+7. Review: the full character sheet, with all numbers calculated.
+
+**Levelling up** uses the same builder: the app shows the choices for the new level.
 
 ## 4. The world: procedural, layered, editable
 
@@ -76,6 +95,22 @@ World / Region map (each hex ≈ 1 mile, overland travel)
 - **DM edits are stored on top** of the generated map, so changes are never lost.
 - **Generated content per location:** name, layout, terrain and buildings, NPCs (name, role, personality, short description), loot and encounters (from the SRD monster and item lists, scaled to party level).
 - **The DM can always:** regenerate, edit hexes by hand, rename things, add or remove NPCs and monsters, or lock a map so it never changes.
+
+### 4a. DM-guided generation (story context)
+The story is the DM's, so the DM can steer what gets generated. This is **optional**: with no input, the generator picks everything at random.
+
+- **Before generating**, the DM can fill in any of: a short description ("a fishing village living in fear of something in the lake"), type and size (hamlet, village, town; cottage, tavern, temple; cave, crypt, mine...), mood or theme (peaceful, haunted, war-torn, festive), party level or difficulty, and specific things that must be there ("a blacksmith named Torva", "a hidden trapdoor to the cellar").
+- **Story notes and tags carry over:** the campaign has notes and tags (e.g. "cult of the drowned god", "region: northern marshes"). New places generated inside a region inherit its context, so the world stays consistent.
+- **Preview before showing players:** the DM sees the result first, can reroll all or part of it (just the layout, just the NPCs, just the name), edit it, and only then reveal it on the Main Screen.
+- **Pinned content:** anything the DM writes or locks stays fixed when other parts are regenerated.
+
+**How the context is used:** first version: the built-in generator matches keywords and tags against its tables (e.g. "haunted" → more ruins, fewer NPCs, undead encounters). Possible later addition: an optional AI text generator that turns the DM's description into names, NPC personalities and descriptions. That would need an AI service and costs a little money per use, so it would stay switchable.
+
+### 4b. Fog of war (DM's choice)
+- **Off / Manual / Automatic**, chosen by the DM per map (and changeable at any moment).
+- **Manual:** the DM paints areas visible or hidden.
+- **Automatic:** what the player tokens can see is revealed using line of sight (walls block vision; light and darkvision rules are a later step). The DM can still reveal or hide anything by hand.
+- Explored areas stay revealed but dimmed; hidden monsters and traps never appear on the Main Screen until the DM reveals them.
 
 ### Map scale
 - Tactical maps (towns, interiors, dungeons): **1 hex = 5 feet**, the standard 5e combat scale.
@@ -160,7 +195,10 @@ Inspired by **Watabou's generators** (Medieval Fantasy City Generator, village a
 - Minimal labels in a fantasy-but-readable font.
 
 **Changes for our game:**
-- A **hex grid is drawn over every map** (thin, semi-transparent lines so the art stays readable), and generation is **hex-aware**: walls, doors and building edges follow hex edges, so every hex is clearly floor, wall, door, water, etc. That's needed for movement and range rules.
+- A **hex grid is drawn over every map** (thin, semi-transparent lines so the art stays readable).
+- **The hex grid does not limit the shapes on the map.** Rooms can be square or rectangular, walls can be straight at any angle, and buildings look like normal buildings. The map's shapes (rooms, walls, doors, rivers) are drawn freely, and the grid is a separate layer on top.
+- **Each hex gets a rules type from what's under it:** the app looks at what covers the hex (mainly its centre) and marks it as floor, wall, door, water, difficult terrain, etc. Hexes cut by a wall count as wall or floor depending on which side covers more. That's what movement, range and line of sight use. The DM can change the type of any single hex by hand.
+- Line of sight and walls use the **real wall lines**, not hex edges, so a straight wall blocks vision in a straight line.
 - The colours must stay readable under miniatures and on a bright tablet; highlights (movement, range, AoE) use strong, colour-blind-safe overlays.
 - A light and dark theme for different table lighting.
 
@@ -170,10 +208,11 @@ Inspired by **Watabou's generators** (Medieval Fantasy City Generator, village a
 
 Decided in v0.2: 2024 rules ✔ · name "dnd" for now ✔ · players sit all around the screen ✔ · Watabou-inspired style ✔
 
+Decided in v0.3: square rooms and free shapes on the hex grid ✔ · fog of war is a DM option ✔ · DM can steer generation with story context ✔ · character creation on any device, import or guided ✔
+
 Still open:
-1. **Large creatures on hexes:** what footprint shapes to use for Large/Huge/Gargantuan?
-2. **Line of sight / fog of war:** reveal automatically based on what tokens can see, or only by hand by the DM? Proposed: automatic, with the DM able to override.
-3. **Character creation:** on the phone before the first session, or can the DM pre-make characters?
+1. **Large creatures on hexes:** footprint shapes for Large/Huge/Gargantuan. To decide when building tokens; it depends on creature size.
+2. **AI text generation** for DM-guided generation: wanted later, or keep it to built-in tables only?
 
 ## 12. Build order (milestones)
 
