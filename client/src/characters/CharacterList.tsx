@@ -26,7 +26,7 @@ export function CharacterList({ store, state }: { store: GameStore; state: RoomS
               className="compact-select"
               value={c.ownerId && players.some((p) => p.id === c.ownerId) ? c.ownerId : ''}
               onChange={(e) =>
-                store.request('character:assign', { id: c.id, memberId: e.target.value || null }).then(() => setError(null), (err: Error) => setError(err.message))
+                store.request('character:assign', { characterId: c.id, memberId: e.target.value || null }).then(() => setError(null), (err: Error) => setError(err.message))
               }
               aria-label={`Who plays ${c.name}`}
             >

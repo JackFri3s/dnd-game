@@ -6,13 +6,15 @@ import { read, write } from './socket.ts';
 
 export type DistanceUnit = 'hex' | 'ft' | 'm';
 export type Theme = 'auto' | 'light' | 'dark';
+export type Style = 'minimal' | 'parchment';
 
 export interface Settings {
   unit: DistanceUnit;
   theme: Theme;
+  style: Style;
 }
 
-const DEFAULTS: Settings = { unit: 'hex', theme: 'auto' };
+const DEFAULTS: Settings = { unit: 'hex', theme: 'auto', style: 'minimal' };
 const listeners = new Set<() => void>();
 
 let current: Settings = (() => {
@@ -48,6 +50,8 @@ export function applyTheme() {
   const root = document.documentElement;
   if (current.theme === 'auto') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', current.theme);
+  if (current.style === 'parchment') root.setAttribute('data-style', 'parchment');
+  else root.removeAttribute('data-style');
 }
 
 /** A rules distance (in feet, as 5e uses) shown in the chosen unit. 5 ft = 1 hex = 1.5 m. */

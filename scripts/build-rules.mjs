@@ -40,6 +40,32 @@ const [classes, levels, species, subspecies, backgrounds, feats, skills, spells,
 
 const skillIndex = (profIndex) => profIndex.replace(/^skill-/, '');
 
+/** "60 feet" -> 60, "Self" -> 0, "Touch" -> 5, "1 mile" -> 5280; null for "Sight", "Special", ... */
+function rangeFeet(range = '') {
+  const r = range.toLowerCase();
+  if (r.startsWith('self')) return 0;
+  if (r.startsWith('touch')) return 5;
+  const ft = r.match(/^(\d+) feet/);
+  if (ft) return Number(ft[1]);
+  const mi = r.match(/^(\d+) miles?/);
+  if (mi) return Number(mi[1]) * 5280;
+  return null;
+}
+
+/** The spell's area (e.g. "20-foot-radius Sphere"), read from its description. */
+function spellArea(text = '') {
+  const t = text.replace(/(\d+)foot/g, '$1-foot').replace(/foothigh/g, 'foot-high');
+  let m = t.match(/(\d+)-foot-long,? (\d+)-foot-wide Line/i) ?? null;
+  if (m) return { shape: 'line', size: Number(m[1]), width: Number(m[2]) };
+  m = t.match(/(\d+)-foot-wide,? (\d+)-foot-long Line/i);
+  if (m) return { shape: 'line', size: Number(m[2]), width: Number(m[1]) };
+  m = t.match(/Line (?:that is )?(\d+) feet long and (\d+) feet wide/i);
+  if (m) return { shape: 'line', size: Number(m[1]), width: Number(m[2]) };
+  m = t.match(/(\d+)-foot(?:-radius)?(?:,? \d+-foot-(?:high|tall))?,? (Sphere|Cone|Cube|Cylinder|Emanation)/i);
+  if (m) return { shape: m[2].toLowerCase(), size: Number(m[1]) };
+  return null;
+}
+
 /** Turns the source's nested "option" objects into simple A/B equipment choices. */
 function equipmentOptions(list = []) {
   const out = [];
@@ -136,7 +162,10 @@ const data = {
     school: s.school?.name ?? '',
     classes: (s.classes ?? []).map((c) => c.index),
     castingTime: s.casting_time ?? '',
-    range: s.range ?? '',
+    range: (s.range ?? '').replace(/ Component:.*$/, ''),
+    rangeFt: rangeFeet(s.range),
+    ...(spellArea(s.description) ? { area: spellArea(s.description) } : {}),
+    ...(s.attack_type ? { attack: s.attack_type } : {}),
     components: [(s.components ?? []).join(', '), s.material ? `(${s.material})` : ''].filter(Boolean).join(' '),
     duration: s.duration ?? '',
     concentration: !!s.concentration,

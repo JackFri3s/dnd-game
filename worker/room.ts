@@ -22,6 +22,7 @@ import {
   type CampaignSummary,
   type Character,
   type DiceRoll,
+  type Area,
 } from '../shared/protocol.ts';
 import type { CampaignExport } from './campaign.ts';
 import { boardBounds, cellToHex, hexToPoint, hexesInRange, hexKey, onBoard, pointToHex } from '../shared/hex.ts';
@@ -46,6 +47,7 @@ interface StoredRoom {
   campaign: { key: string; name: string } | null;
   characters: Record<string, Character>;
   rolls: DiceRoll[];
+  areas: Area[];
 }
 
 const KEY_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -54,7 +56,7 @@ const KEY_LENGTH = 10;
 function emptyWorld(): World {
   const board = DEFAULT_BOARD;
   const b = boardBounds(board);
-  return { board, tokens: {}, view: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, highlight: null, nextTokenId: 1, characters: {} };
+  return { board, tokens: {}, view: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [] };
 }
 
 function worldOf(room: StoredRoom): World {
@@ -65,6 +67,7 @@ function worldOf(room: StoredRoom): World {
     highlight: room.highlight,
     nextTokenId: room.nextTokenId,
     characters: room.characters,
+    areas: room.areas,
   };
 }
 
@@ -75,6 +78,7 @@ function applyWorld(room: StoredRoom, world: World) {
   room.highlight = world.highlight;
   room.nextTokenId = world.nextTokenId;
   room.characters = world.characters ?? {};
+  room.areas = world.areas ?? [];
 }
 
 const DEFAULT_BOARD = { cols: 40, rows: 28 };
@@ -92,6 +96,7 @@ function withDefaults(room: Partial<StoredRoom> & Pick<StoredRoom, 'code' | 'tab
     campaign: null,
     characters: {},
     rolls: [],
+    areas: [],
     ...room,
     board,
     table: {
@@ -345,7 +350,13 @@ export class GameRoom extends DurableObject<Env> {
           const token = room.tokens[h?.tokenId];
           if (!token) throw new GameError('Token not found.');
           if (me.role === 'player' && token.ownerId !== me.id) throw new GameError('You can only do that for your own token.');
-          room.highlight = { tokenId: token.id, kind: h.kind === 'range' ? 'range' : 'move', feet: num(h.feet, 5, 1000) };
+          room.highlight = {
+            tokenId: token.id,
+            kind: h.kind === 'range' || h.kind === 'spell' ? h.kind : 'move',
+            feet: num(h.feet, 0, 6000),
+            ...(h.longFeet ? { longFeet: num(h.longFeet, 0, 6000) } : {}),
+            ...(h.label ? { label: cleanTitle(h.label) } : {}),
+          };
         }
         return this.commit(room);
       }
@@ -390,7 +401,7 @@ export class GameRoom extends DurableObject<Env> {
       }
 
       case 'character:delete': {
-        const c = room.characters[String(msg.id)];
+        const c = room.characters[String(msg.characterId)];
         if (!c) throw new GameError('Character not found.');
         if (me?.role !== 'dm' && !(me?.role === 'player' && c.ownerId === me.id)) throw new GameError('Not allowed.');
         delete room.characters[c.id];
@@ -400,7 +411,7 @@ export class GameRoom extends DurableObject<Env> {
 
       case 'character:assign': {
         requireRole(me, 'dm');
-        const c = room.characters[String(msg.id)];
+        const c = room.characters[String(msg.characterId)];
         if (!c) throw new GameError('Character not found.');
         const target = msg.memberId ? room.members[msg.memberId] : null;
         if (msg.memberId && target?.role !== 'player') throw new GameError('Player not found.');
@@ -413,6 +424,41 @@ export class GameRoom extends DurableObject<Env> {
           Object.assign(token, { ownerId: target.id, color: target.color });
         } else if (token) token.ownerId = null;
         else if (target && room.phase === 'playing') syncCharacterToken(room, c);
+        return this.commit(room);
+      }
+
+      // ---------- areas ----------
+
+      case 'area:add': {
+        if (!me || me.role === 'table') throw new GameError('Not allowed.');
+        const a = msg.area;
+        const token = a?.tokenId ? room.tokens[a.tokenId] : undefined;
+        if (me.role === 'player' && token?.ownerId !== me.id) throw new GameError('You can only cast from your own token.');
+        const shapes = ['sphere', 'cone', 'cube', 'cylinder', 'emanation', 'line'] as const;
+        if (!shapes.includes(a?.shape)) throw new GameError('Unknown area shape.');
+        const area: Area = {
+          id: `a${crypto.randomUUID().slice(0, 8)}`,
+          tokenId: token?.id ?? null,
+          placedBy: me.id,
+          label: cleanTitle(a.label) || 'Area',
+          shape: a.shape,
+          sizeFt: num(a.sizeFt, 5, 500),
+          ...(a.widthFt ? { widthFt: num(a.widthFt, 5, 100) } : {}),
+          rangeFt: a.rangeFt === null ? null : num(a.rangeFt, 0, 30000),
+          origin: { q: int(a.origin?.q), r: int(a.origin?.r) },
+          target: { q: int(a.target?.q), r: int(a.target?.r) },
+          at: Date.now(),
+        };
+        room.areas = [...room.areas, area].slice(-30);
+        await this.commit(room);
+        return { id: area.id } satisfies Requests['area:add']['result'];
+      }
+
+      case 'area:remove': {
+        const area = room.areas.find((x) => x.id === msg.areaId);
+        if (!area) return null;
+        if (me?.role !== 'dm' && area.placedBy !== me?.id) throw new GameError('Only the Dungeon Master or the caster can remove this.');
+        room.areas = room.areas.filter((x) => x.id !== area.id);
         return this.commit(room);
       }
 
@@ -667,6 +713,7 @@ export class GameRoom extends DurableObject<Env> {
       highlight: room.highlight,
       characters: Object.values(room.characters),
       rolls: room.rolls,
+      areas: room.areas,
     };
   }
 

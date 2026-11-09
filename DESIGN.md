@@ -10,7 +10,7 @@ A digital tabletop role-playing game for a group sitting around a real table. A 
 
 | Topic | Decision |
 |---|---|
-| Look | **Minimal and greyscale** (black, white, greys). Colour only where it means something: each player's token colour (muted) and connection status. |
+| Look | Two styles, chosen per device in Settings: **Minimal** (greyscale, the default) and **Parchment** (fantasy, aged paper and ink). Important things always keep their colour: **movement green, attack ranges red, spells and spell areas purple**, plus each player's (muted) token colour. |
 | Distances | Shown in **hexes** by default; each device can choose hexes, feet or metres in **Settings** (home menu). The rules still work in feet internally (1 hex = 5 ft = 1.5 m). |
 | Platform | Web app: every device just opens a browser. Nothing to install. |
 | Hosting | **On the internet** (option a). Players join with a room code or QR code. |

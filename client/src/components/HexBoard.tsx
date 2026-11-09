@@ -13,8 +13,35 @@ import {
   type Hex,
   type Point,
 } from '../../../shared/hex.ts';
-import { SEATS, type RoomState, type Token } from '../../../shared/protocol.ts';
+import { SEATS, type Area, type RoomState, type Token } from '../../../shared/protocol.ts';
+import { areaHexes, findPath, reachable, type MoveRules } from '../../../shared/areas.ts';
 import { SIDE_ROTATION } from '../seats.ts';
+import { formatDistance, useSettings } from '../settings.ts';
+
+/** Which hexes a token can't enter (blocked) or can pass but not stop on (noStop). */
+export function moveRulesFor(token: Token, state: RoomState): MoveRules {
+  const blocked = new Set<string>();
+  const noStop = new Set<string>();
+  for (const t of state.tokens) {
+    if (t.id === token.id) continue;
+    const key = `${t.q},${t.r}`;
+    // Creatures on the other side block the way; others can be passed (but not stopped on).
+    const enemy = (token.kind === 'player' && t.kind === 'monster') || (token.kind === 'monster' && t.kind === 'player');
+    (enemy ? blocked : noStop).add(key);
+  }
+  return { board: state.board, blocked, noStop };
+}
+
+/** An area being aimed (not placed yet), drawn dashed. */
+export type AreaPreview = Omit<Area, 'id' | 'placedBy' | 'at'>;
+
+const pathOf = (hexes: Hex[], shrink = 0.97) =>
+  hexes
+    .map((h) => {
+      const c = hexCorners(hexToPoint(h), HEX_RADIUS * shrink);
+      return `M${c.map((p) => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join('L')}Z`;
+    })
+    .join('');
 
 export interface Camera {
   x: number; // centre of the view, in map units
@@ -35,6 +62,10 @@ interface Props {
   faceSeats?: boolean;
   /** DM only: show (and let them drag) the area the Main Screen is showing. */
   tableFrame?: { onMove: (center: Point) => void };
+  /** Tapping an empty hex (e.g. to aim a spell). */
+  onTapHex?: (hex: Hex) => void;
+  /** A spell area being aimed. */
+  areaPreview?: AreaPreview | null;
 }
 
 const MIN_SCALE = 12;
@@ -51,7 +82,10 @@ export function HexBoard({
   onSelectToken,
   faceSeats,
   tableFrame,
+  onTapHex,
+  areaPreview,
 }: Props) {
+  const { unit } = useSettings();
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   // A token being dragged: where the finger/mouse currently is (map units).
@@ -98,23 +132,65 @@ export function HexBoard({
   }, [state.board]);
   const bounds = boardBounds(state.board);
 
+  // ---- movement / range highlight ----
   const highlightToken = state.highlight && state.tokens.find((t) => t.id === state.highlight!.tokenId);
-  const highlightPath = useMemo(() => {
-    if (!state.highlight || !highlightToken) return '';
-    const range = Math.floor(state.highlight.feet / FEET_PER_HEX);
-    return hexesInRange(highlightToken, range)
-      .filter((h) => onBoard(h, state.board) && hexDistance(h, highlightToken) > 0)
-      .map((h) => {
-        const c = hexCorners(hexToPoint(h), HEX_RADIUS * 0.97);
-        return `M${c.map((p) => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join('L')}Z`;
-      })
-      .join('');
-  }, [state.highlight, highlightToken?.q, highlightToken?.r, state.board]); // eslint-disable-line react-hooks/exhaustive-deps
+  const highlight = useMemo(() => {
+    const h = state.highlight;
+    if (!h || !highlightToken) return null;
+    const steps = Math.floor(h.feet / FEET_PER_HEX);
+    if (h.kind === 'move') {
+      const reach = reachable(highlightToken, steps, moveRulesFor(highlightToken, state));
+      const hexes = [...reach.keys()].map((k) => {
+        const [q, r] = k.split(',').map(Number);
+        return { q, r };
+      });
+      return { near: pathOf(hexes), far: '' };
+    }
+    // Long ranges can be far bigger than the map: then only look at the map's own hexes.
+    const around = (n: number) =>
+      (n > state.board.cols + state.board.rows ? boardHexes(state.board) : hexesInRange(highlightToken, n)).filter(
+        (x) => onBoard(x, state.board) && hexDistance(x, highlightToken) > 0 && hexDistance(x, highlightToken) <= n,
+      );
+    const near = around(steps);
+    const longSteps = h.longFeet ? Math.floor(h.longFeet / FEET_PER_HEX) : 0;
+    const far = longSteps > steps ? around(longSteps).filter((x) => hexDistance(x, highlightToken) > steps) : [];
+    return { near: pathOf(near), far: pathOf(far) };
+  }, [state.highlight, highlightToken?.q, highlightToken?.r, state.board, state.tokens]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- spell areas on the map, and the one being aimed ----
+  const areaShapes = useMemo(
+    () =>
+      state.areas.map((a) => ({
+        area: a,
+        d: pathOf(areaHexes({ shape: a.shape, sizeFt: a.sizeFt, widthFt: a.widthFt }, a.origin, a.target, a.rangeFt, state.board), 0.94),
+      })),
+    [state.areas, state.board],
+  );
+  const previewPath = useMemo(
+    () =>
+      areaPreview
+        ? pathOf(areaHexes({ shape: areaPreview.shape, sizeFt: areaPreview.sizeFt, widthFt: areaPreview.widthFt }, areaPreview.origin, areaPreview.target, areaPreview.rangeFt, state.board), 0.94)
+        : '',
+    [areaPreview, state.board],
+  );
+
+  // ---- the path while dragging a token ----
+  const dragToken = drag ? state.tokens.find((t) => t.id === drag.id) : null;
+  const dragPath = useMemo(() => {
+    if (!drag || !dragToken) return null;
+    const goal = pointToHex(drag.at);
+    if (!onBoard(goal, state.board)) return null;
+    const path = findPath(dragToken, goal, moveRulesFor(dragToken, state));
+    if (!path || path.length < 2) return null;
+    const steps = path.length - 1;
+    return { d: pathOf(path.slice(1), 0.6), steps, over: steps * FEET_PER_HEX > dragToken.speedFt, end: hexToPoint(goal) };
+  }, [drag?.at.x, drag?.at.y, dragToken, state.tokens, state.board]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- panning & zooming (phones and DM) ----
   function onBackgroundPointerDown(e: React.PointerEvent) {
     if (!onCameraChange) {
-      onSelectToken?.(null);
+      if (onTapHex) onTapHex(pointToHex(toMap(e.clientX, e.clientY)));
+      else onSelectToken?.(null);
       return;
     }
     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -141,7 +217,10 @@ export function HexBoard({
     const start = pointers.current.get(e.pointerId);
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
-    if (start && Math.hypot(start.x - e.clientX, start.y - e.clientY) < 4) onSelectToken?.(null);
+    if (start && Math.hypot(start.x - e.clientX, start.y - e.clientY) < 6) {
+      if (onTapHex) onTapHex(pointToHex(toMap(e.clientX, e.clientY)));
+      else onSelectToken?.(null);
+    }
   }
   function onWheel(e: React.WheelEvent) {
     if (!onCameraChange) return;
@@ -221,9 +300,13 @@ export function HexBoard({
           height={bounds.maxY - bounds.minY}
         />
         <path className="grid" d={gridPath} strokeWidth={Math.max(px, 0.012)} />
-        {highlightPath && (
-          <path className={`highlight ${state.highlight!.kind}`} d={highlightPath} strokeWidth={2 * px} />
-        )}
+        {highlight?.far && <path className={`highlight ${state.highlight!.kind} far`} d={highlight.far} />}
+        {highlight?.near && <path className={`highlight ${state.highlight!.kind}`} d={highlight.near} strokeWidth={1.5 * px} />}
+        {areaShapes.map(({ area, d }) => (
+          <path key={area.id} className="area" d={d} strokeWidth={1.5 * px} data-testid={`area-${area.label}`} />
+        ))}
+        {previewPath && <path className="area preview" d={previewPath} strokeWidth={2 * px} data-testid="area-preview" />}
+        {dragPath && <path className={`move-path ${dragPath.over ? 'over' : ''}`} d={dragPath.d} />}
 
         {state.tokens.map((token) => {
           const dragging = drag?.id === token.id;
@@ -253,6 +336,25 @@ export function HexBoard({
           );
         })}
 
+        {areaShapes.map(({ area }) => {
+          const at = hexToPoint(area.target);
+          const caster = state.tokens.find((t) => t.id === area.tokenId);
+          const rot = faceSeats && caster?.kind === 'player' ? SIDE_ROTATION[seatSide(caster.ownerId)] : 0;
+          return (
+            <text key={area.id} className="area-label" x={at.x} y={at.y} transform={`rotate(${rot} ${at.x} ${at.y})`} fontSize={0.34} dy="-0.62">
+              {area.label}
+            </text>
+          );
+        })}
+        {dragPath && (
+          <g transform={`translate(${dragPath.end.x} ${dragPath.end.y - 0.75})`}>
+            <rect className={`distance-tag ${dragPath.over ? 'over' : ''}`} x={-1.1} y={-0.24} width={2.2} height={0.42} rx={0.21} />
+            <text className="distance-text" dy="0.06" fontSize={0.26}>
+              {formatDistance(dragPath.steps * FEET_PER_HEX, unit)}
+              {dragPath.over ? ' · over speed' : ''}
+            </text>
+          </g>
+        )}
         {tableArea && (
           <g
             className="table-frame"

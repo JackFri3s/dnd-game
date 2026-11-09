@@ -91,7 +91,12 @@ export interface RulesSpell {
   concentration: boolean;
   ritual: boolean;
   description: string;
+  rangeFt: number | null; // 0 = self, 5 = touch, null = special
+  area?: { shape: AreaShape; size: number; width?: number };
+  attack?: 'melee' | 'ranged';
 }
+
+export type AreaShape = 'sphere' | 'cone' | 'cube' | 'cylinder' | 'emanation' | 'line';
 
 export interface RulesText {
   index: string;

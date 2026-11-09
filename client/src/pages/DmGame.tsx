@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import type { Highlight, Member, RoomState, TokenKind } from '../../../shared/protocol.ts';
+import type { Member, RoomState, TokenKind } from '../../../shared/protocol.ts';
 import type { GameStore } from '../game.ts';
 import { HexBoard, type Camera } from '../components/HexBoard.tsx';
 import { CalibrationControls } from '../components/CalibrationControls.tsx';
 import { CampaignPanel } from '../components/CampaignPanel.tsx';
-import { RangeChips } from '../components/RangeChips.tsx';
+import { ActionPanel, AimBar, useAim } from '../components/Actions.tsx';
+import { useRules } from '../rules/index.ts';
 import { CharacterList } from '../characters/CharacterList.tsx';
 import { seatNumber } from '../seats.ts';
 
@@ -32,9 +33,9 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const players = state.members.filter((m) => m.role === 'player');
   const table = state.members.find((m) => m.role === 'table');
   const owner = selected?.ownerId ? state.members.find((m) => m.id === selected.ownerId) : null;
-
-  const showHighlight = (h: Omit<Highlight, 'tokenId'> | null) =>
-    selected && run(store.request('highlight:set', { highlight: h && { ...h, tokenId: selected.id } }));
+  const selectedCharacter = selected?.characterId ? (state.characters.find((c) => c.id === selected.characterId) ?? null) : null;
+  const rules = useRules();
+  const aimState = useAim(store, state);
 
   function kick(p: Member) {
     if (!confirm(`Remove ${p.name} from the game? Their token stays on the map.`)) return;
@@ -72,6 +73,8 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
             if (t) setPanel('token');
           }}
           tableFrame={{ onMove: (c) => run(store.request('view:set', c)) }}
+          onTapHex={aimState.aim ? aimState.tapHex : undefined}
+          areaPreview={aimState.preview}
         />
       </div>
       <footer className="game-controls">
@@ -92,7 +95,19 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
                 <strong>{selected.name}</strong>
                 <span className="hint">{selected.kind === 'player' ? (owner ? `played by ${owner.name}` : 'no player') : selected.kind}</span>
               </p>
-              <RangeChips token={selected} highlight={state.highlight} onShow={showHighlight} />
+              {aimState.aim ? (
+                <AimBar aimState={aimState} character={selectedCharacter} rules={rules} />
+              ) : (
+                <ActionPanel
+                  store={store}
+                  state={state}
+                  token={selected}
+                  character={selectedCharacter}
+                  rules={rules}
+                  aimState={aimState}
+                  canRemoveArea={() => true}
+                />
+              )}
               {selected.kind === 'player' && (
                 <label className="inline-label">
                   Played by

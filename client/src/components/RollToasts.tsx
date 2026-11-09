@@ -35,7 +35,11 @@ export function RollToasts({ state }: { state: RoomState }) {
         <div key={side} className={`roll-stack roll-${side}`}>
           <div className="roll-stack-inner" style={{ transform: `rotate(${SIDE_ROTATION[side as keyof typeof SIDE_ROTATION]}deg)` }}>
             {rolls.slice(0, 2).map((r) => (
-              <div key={r.id} className="roll-card" data-testid="table-roll">
+              <div
+                key={r.id}
+                className={`roll-card ${r.groups.length === 1 && r.groups[0].sides === 20 ? (r.groups[0].rolls[0] === 20 ? 'crit' : r.groups[0].rolls[0] === 1 ? 'fumble' : '') : ''}`}
+                data-testid="table-roll"
+              >
                 <div className="hint">{r.label}</div>
                 {r.groups.length > 1 ? (
                   <div className="roll-sets">

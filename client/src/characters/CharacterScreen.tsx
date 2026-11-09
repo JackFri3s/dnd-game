@@ -49,7 +49,7 @@ export function CharacterScreen({
 
   async function remove() {
     if (!character || !confirm(`Delete ${character.name}? This can't be undone (except by going back to a save point).`)) return;
-    await store.request('character:delete', { id: character.id });
+    await store.request('character:delete', { characterId: character.id });
     onClose();
   }
 

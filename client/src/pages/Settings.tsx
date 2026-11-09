@@ -1,9 +1,13 @@
-import { useSettings, updateSettings, type DistanceUnit, type Theme } from '../settings.ts';
+import { useSettings, updateSettings, type DistanceUnit, type Style, type Theme } from '../settings.ts';
 
 const UNITS: { id: DistanceUnit; label: string; hint: string }[] = [
   { id: 'hex', label: 'Hexes', hint: '1 hex = 5 ft' },
   { id: 'ft', label: 'Feet', hint: 'As in the rule books' },
   { id: 'm', label: 'Metres', hint: '1 hex = 1.5 m' },
+];
+const STYLES: { id: Style; label: string; hint: string }[] = [
+  { id: 'minimal', label: 'Minimal', hint: 'Clean black, white and grey' },
+  { id: 'parchment', label: 'Parchment', hint: 'Fantasy, aged paper and ink' },
 ];
 const THEMES: { id: Theme; label: string }[] = [
   { id: 'auto', label: 'Automatic' },
@@ -40,7 +44,21 @@ export function SettingsPage() {
       </section>
       <section className="card">
         <h2>Appearance</h2>
-        <div className="segmented" role="radiogroup" aria-label="Appearance">
+        <div className="segmented" role="radiogroup" aria-label="Style">
+          {STYLES.map((s) => (
+            <button
+              key={s.id}
+              role="radio"
+              aria-checked={settings.style === s.id}
+              className={settings.style === s.id ? 'on' : ''}
+              onClick={() => updateSettings({ style: s.id })}
+            >
+              {s.label}
+              <small>{s.hint}</small>
+            </button>
+          ))}
+        </div>
+        <div className="segmented" role="radiogroup" aria-label="Light or dark">
           {THEMES.map((t) => (
             <button
               key={t.id}

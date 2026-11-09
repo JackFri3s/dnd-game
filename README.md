@@ -10,7 +10,7 @@ See [DESIGN.md](DESIGN.md) for the full plan.
 
 ## Status
 
-Steps 1–4 of the build order are done: **connecting the screens**, **the hex board**, **saving** and **rules and characters**.
+Steps 1–5 of the build order are done: **connecting the screens**, **the hex board**, **saving**, **rules and characters** and **movement and ranges**.
 
 - Open `/table` on the Main Screen: it shows a game code and QR code. It needs no touch screen.
 - Players scan the QR code (or open `/join`), choose **Player** or **Dungeon Master**, enter their name and pick their seat.
@@ -25,6 +25,9 @@ Steps 1–4 of the build order are done: **connecting the screens**, **the hex b
 - **Characters** (step 4): players create their character on their phone, either **step by step** (class, background and species, ability scores by rolling 4d6-drop-lowest, the standard array or point buy, skills, equipment, spells, details) or by **entering an existing character** (the app works out the numbers and warns about anything that doesn't add up). The DM can make pre-made characters and hand characters to players.
 - **Character sheet** on the phone: hit points (damage/heal), AC, speed, abilities, saves, skills, attacks, spells and spell slots, features and traits, equipment. Tap anything to roll it; **dice are rolled by the server** and shown on the Main Screen at the roller's seat.
 
+
+- **Movement and ranges** (step 5): the movement area follows the paths a creature can walk (enemies block the way, allies can be passed); dragging a token shows its path and distance. Each weapon shows its reach or normal/long range, each spell its range, and spells with an area (sphere, cone, line, cube, cylinder, emanation; 73 spells) can be aimed on the map and cast, using a spell slot. Areas stay on every screen until removed.
+- **Two looks** (Settings): **Minimal** (greyscale) or **Parchment** (the fantasy paper-and-ink look), each in light or dark. In both, movement is green, attacks are red and spells are purple.
 
 ## Run it on your computer
 

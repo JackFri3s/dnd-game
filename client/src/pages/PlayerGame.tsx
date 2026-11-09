@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import type { Highlight, Member, RoomState } from '../../../shared/protocol.ts';
+import type { Member, RoomState } from '../../../shared/protocol.ts';
 import { hexToPoint } from '../../../shared/hex.ts';
 import type { GameStore } from '../game.ts';
 import { HexBoard, type Camera } from '../components/HexBoard.tsx';
-import { RangeChips } from '../components/RangeChips.tsx';
+import { ActionPanel, AimBar, useAim } from '../components/Actions.tsx';
+import { useRules } from '../rules/index.ts';
 import { CharacterScreen } from '../characters/CharacterScreen.tsx';
 
 /** A player's phone during play: their own view of the map, and their token's controls. */
@@ -26,11 +27,11 @@ export function PlayerGame({
   const [menu, setMenu] = useState(false);
   const [showCharacter, setShowCharacter] = useState(false);
   const myCharacter = state.characters.find((c) => c.ownerId === me.id) ?? null;
+  const rules = useRules();
+  const aimState = useAim(store, state);
   const [error, setError] = useState<string | null>(null);
   const run = (p: Promise<unknown>) => p.then(() => setError(null), (e: Error) => setError(e.message));
 
-  const show = (h: Omit<Highlight, 'tokenId'> | null) =>
-    myToken && run(store.request('highlight:set', { highlight: h && { ...h, tokenId: myToken.id } }));
   const dm = state.members.find((m) => m.role === 'dm');
 
   return (
@@ -65,19 +66,29 @@ export function PlayerGame({
           canDrag={(t) => t.ownerId === me.id}
           onMoveToken={(token, hex) => run(store.request('token:move', { tokenId: token.id, ...hex }))}
           selectedTokenId={myToken?.id}
+          onTapHex={aimState.aim ? aimState.tapHex : undefined}
+          areaPreview={aimState.preview}
         />
       </div>
       <footer className="game-controls">
         {error && <p className="error">{error}</p>}
         {myToken ? (
-          <>
-            <p className="hint">Drag your token to move it. Show on every screen:</p>
-            <RangeChips
-              token={myToken}
-              highlight={state.highlight?.tokenId === myToken.id ? state.highlight : null}
-              onShow={show}
-            />
-          </>
+          aimState.aim ? (
+            <AimBar aimState={aimState} character={myCharacter} rules={rules} />
+          ) : (
+            <>
+              <p className="hint">Drag your token to move it. Tap to show on every screen:</p>
+              <ActionPanel
+                store={store}
+                state={state}
+                token={myToken}
+                character={myCharacter}
+                rules={rules}
+                aimState={aimState}
+                canRemoveArea={(a) => a.placedBy === me.id}
+              />
+            </>
+          )
         ) : (
           <p className="hint">Your token will appear when the Dungeon Master places it.</p>
         )}

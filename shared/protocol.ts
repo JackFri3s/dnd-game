@@ -1,6 +1,6 @@
 // Messages and data shared between the game server and every screen.
 
-import type { Character } from './rules.ts';
+import type { AreaShape, Character } from './rules.ts';
 export type { Character };
 
 export type Role = 'table' | 'player' | 'dm';
@@ -62,8 +62,25 @@ export interface Token {
 /** A movement or range area shown around a token on every screen. */
 export interface Highlight {
   tokenId: string;
-  kind: 'move' | 'range';
+  kind: 'move' | 'range' | 'spell';
   feet: number;
+  longFeet?: number; // ranged weapons: long range (attacks at disadvantage)
+  label?: string; // e.g. "Longbow" or "Fire Bolt"
+}
+
+/** A spell or effect area placed on the map (e.g. a Fireball), seen on every screen. */
+export interface Area {
+  id: string;
+  tokenId: string | null; // who cast it
+  placedBy: string; // member id
+  label: string;
+  shape: AreaShape;
+  sizeFt: number;
+  widthFt?: number;
+  rangeFt: number | null;
+  origin: { q: number; r: number };
+  target: { q: number; r: number };
+  at: number;
 }
 
 /** The part of a game that belongs to the campaign and is saved with it. */
@@ -74,6 +91,7 @@ export interface World {
   highlight: Highlight | null;
   nextTokenId: number;
   characters: Record<string, Character>;
+  areas: Area[];
 }
 
 /** A dice roll made through the app; shown on the Main Screen at the roller's seat. */
@@ -122,6 +140,7 @@ export interface RoomState {
   highlight: Highlight | null;
   characters: Character[];
   rolls: DiceRoll[]; // the latest rolls, newest first
+  areas: Area[];
 }
 
 /** Standard CSS pixels per mm (96 per inch): used until the Main Screen is calibrated. */
@@ -176,8 +195,11 @@ export interface Requests {
   // ---- characters ----
   // Players save their own character; the DM can save any (e.g. pre-made ones).
   'character:save': { args: { character: Character }; result: { id: string } };
-  'character:delete': { args: { id: string }; result: null };
-  'character:assign': { args: { id: string; memberId: string | null }; result: null }; // DM
+  'character:delete': { args: { characterId: string }; result: null };
+  'character:assign': { args: { characterId: string; memberId: string | null }; result: null }; // DM
+  // ---- spell and effect areas on the map ----
+  'area:add': { args: { area: Omit<Area, 'id' | 'placedBy' | 'at'> }; result: { id: string } };
+  'area:remove': { args: { areaId: string }; result: null };
   // ---- dice (rolled by the server, so everyone can trust them) ----
   'dice:roll': { args: DiceRequest; result: { roll: DiceRoll } };
 
@@ -197,6 +219,7 @@ export interface Requests {
 }
 export type RequestName = keyof Requests;
 
+// Note: request arguments must not use the field names "id" or "type": those belong to the message.
 export type ClientMessage = {
   [K in RequestName]: { id: number; type: K } & Requests[K]['args'];
 }[RequestName];
@@ -213,3 +236,8 @@ export type ServerMessage =
 export const CLOSE_REPLACED = 4000; // the same device opened the game somewhere else
 export const CLOSE_KICKED = 4001; // the DM removed this player
 export const CLOSE_NO_ROOM = 4004; // this game doesn't exist
+
+// Compile-time check: no request may use "id" or "type" as an argument name
+// (they would overwrite the message's own fields). A clash names the request here.
+type ClashingRequest = { [K in RequestName]: Extract<keyof Requests[K]['args'], 'id' | 'type'> extends never ? never : K }[RequestName];
+export const NO_CLASHING_ARGS: [ClashingRequest] extends [never] ? true : ClashingRequest = true;
