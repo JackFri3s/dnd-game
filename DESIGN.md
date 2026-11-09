@@ -27,6 +27,7 @@ A digital tabletop role-playing game for a group sitting around a real table. A 
 ## 3. The three screens
 
 ### 3.1 Main Screen (shared table display)
+- **Needs no touch screen, mouse or keyboard**: it can be a TV. Everything it shows is controlled from the DM's device (starting the campaign, calibration, what part of the map is shown). If it does have touch, tokens can also be dragged on it.
 - Creates a game session and shows the **room code + QR code**.
 - Shows the current map: hex grid, terrain, buildings, tokens, fog of war.
 - Shows only what the DM has revealed, never DM-only notes or hidden monsters.
@@ -42,7 +43,7 @@ A digital tabletop role-playing game for a group sitting around a real table. A 
 - The map itself has no "up": a compass rose shows north.
 
 ### 3.2 Player device (phone/tablet, one per player)
-- Join with the room code or QR code, then pick, import or create a character (see §3.4).
+- Join with the room code or QR code, choosing **Player or Dungeon Master** on the join page (and switch later if needed), then pick, import or create a character (see §3.4).
 - Character sheet: ability scores, HP, AC, conditions, spells and slots, features, inventory, gold.
 - Action menu: Move, Attack, Cast a Spell, Dash, Dodge, Help, Hide, Use an Object, and so on.
 - A mini-map to move their own token; reachable hexes are highlighted.
@@ -50,6 +51,8 @@ A digital tabletop role-playing game for a group sitting around a real table. A 
 - Private messages and handouts from the DM.
 
 ### 3.3 DM device (tablet/laptop)
+- **Starts the campaign** (the Main Screen switches from the join screen to the map), and can go back to the lobby.
+- **Calibrates the Main Screen** remotely (see §5).
 - Sees **everything**: the full map, hidden things, monster stats, notes.
 - Generates, regenerates or edits maps, locations and NPCs.
 - Places, hides and reveals tokens, monsters, traps and treasure.
@@ -121,7 +124,7 @@ The story is the DM's, so the DM can steer what gets generated. This is **option
 Screens differ in size and pixel density, so the app can't know how large a hex looks on the table without help.
 
 **Calibration (before the game starts, on the Main Screen):**
-1. The screen shows a rectangle the size of a **credit/bank card** (85.6 × 54 mm, the same on every card). The user drags until the rectangle matches a real card held against the screen. A ruler-based option is also available.
+1. The DM starts calibration from their device; the Main Screen shows a rectangle the size of a **credit/bank card** (85.6 × 54 mm, the same on every card) and a 10 cm ruler. Someone holds a real card against the screen while the DM makes the outline bigger or smaller until it matches (a keyboard on the Main Screen can also be used).
 2. The app now knows pixels-per-millimetre for that screen and saves it on that device.
 3. Hexes are drawn at the chosen real-world size. The default is **1 inch (25.4 mm) across**, which fits standard 25–28 mm miniature bases. The size can be changed.
 4. A test pattern is shown so players can put a miniature on a hex and confirm.

@@ -30,10 +30,54 @@ export interface Member {
   connected: boolean;
 }
 
+export type Phase = 'lobby' | 'playing';
+
+/** How the Main Screen is drawn at real-world size. Set by the DM during calibration. */
+export interface TableSettings {
+  pxPerMm: number; // screen pixels (CSS) per millimetre on the Main Screen
+  hexMm: number; // width of one hex on the table, in mm (1 inch = 25.4)
+  calibrated: boolean;
+  calibrating: boolean; // the Main Screen is showing the calibration card right now
+  viewport: { w: number; h: number } | null; // Main Screen size in CSS pixels
+}
+
+export type TokenKind = 'player' | 'npc' | 'monster';
+
+export interface Token {
+  id: string;
+  q: number;
+  r: number;
+  name: string;
+  label: string; // 1-2 letters shown on the token
+  color: string;
+  kind: TokenKind;
+  ownerId: string | null; // the player who controls it (null = DM only)
+  speedFt: number;
+}
+
+/** A movement or range area shown around a token on every screen. */
+export interface Highlight {
+  tokenId: string;
+  kind: 'move' | 'range';
+  feet: number;
+}
+
 export interface RoomState {
   code: string;
   members: Member[];
+  phase: Phase;
+  table: TableSettings;
+  /** Centre of what the Main Screen shows, in map units (see shared/hex.ts). */
+  view: { x: number; y: number };
+  board: { cols: number; rows: number };
+  tokens: Token[];
+  highlight: Highlight | null;
 }
+
+/** Standard CSS pixels per mm (96 per inch): used until the Main Screen is calibrated. */
+export const DEFAULT_PX_PER_MM = 96 / 25.4;
+export const DEFAULT_HEX_MM = 25.4;
+export const CARD_MM = { w: 85.6, h: 53.98 }; // bank/credit card (ISO/IEC 7810 ID-1)
 
 export const PLAYER_COLORS = [
   '#d94f3d', '#3d7bd9', '#3da35d', '#d9a13d',
@@ -59,6 +103,22 @@ export interface Requests {
   leave: { args: Record<string, never>; result: null };
   'seat:change': { args: { seat: SeatId }; result: null };
   'dm:kick': { args: { memberId: string }; result: null };
+  // DM: start the campaign, or go back to the lobby (e.g. to show the join code again)
+  'game:phase': { args: { phase: Phase }; result: null };
+  // DM (or the Main Screen itself): calibration
+  'table:calibrate': {
+    args: { pxPerMm?: number; hexMm?: number; calibrating?: boolean; done?: boolean };
+    result: null;
+  };
+  // Main Screen reports its size so the DM can see what it shows
+  'table:viewport': { args: { w: number; h: number }; result: null };
+  // DM: move what the Main Screen shows
+  'view:set': { args: { x: number; y: number }; result: null };
+  'token:move': { args: { tokenId: string; q: number; r: number }; result: null };
+  // DM: add or remove NPC/monster tokens
+  'token:add': { args: { name: string; color: string; kind: TokenKind; q?: number; r?: number }; result: { tokenId: string } };
+  'token:remove': { args: { tokenId: string }; result: null };
+  'highlight:set': { args: { highlight: Highlight | null }; result: null };
 }
 export type RequestName = keyof Requests;
 

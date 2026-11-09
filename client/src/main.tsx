@@ -8,8 +8,8 @@ import { JoinScreen } from './pages/JoinScreen.tsx';
 function App() {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
   if (path === '/table') return <TableScreen />;
-  if (path === '/join') return <JoinScreen role="player" />;
-  if (path === '/dm') return <JoinScreen role="dm" />;
+  if (path === '/join') return <JoinScreen initialRole="player" />;
+  if (path === '/dm') return <JoinScreen initialRole="dm" />;
   return <Home />;
 }
 

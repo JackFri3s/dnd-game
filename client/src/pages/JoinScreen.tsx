@@ -1,47 +1,70 @@
 import { useEffect, useState } from 'react';
 import { SEATS, type Member, type RoomState, type SeatId } from '../../../shared/protocol.ts';
-import { clientId, peekRoom, read, write } from '../socket.ts';
+import { clientId, loadSession, peekRoom, read, write } from '../socket.ts';
 import { GameStore, useGame } from '../game.ts';
+import { seatNumber } from '../seats.ts';
+import { PlayerGame } from './PlayerGame.tsx';
+import { DmGame } from './DmGame.tsx';
+import { CalibrationControls } from '../components/CalibrationControls.tsx';
 
 type Role = 'player' | 'dm';
 const stores = { player: new GameStore('player'), dm: new GameStore('dm') };
 
-export function JoinScreen({ role }: { role: Role }) {
+/** The page for players and the DM: join a game, then the lobby, then the game itself. */
+export function JoinScreen({ initialRole }: { initialRole: Role }) {
+  // If this device was already in a game, go back to it in the same role.
+  const [role, setRole] = useState<Role>(() =>
+    loadSession('dm') ? 'dm' : loadSession('player') ? 'player' : initialRole,
+  );
   const store = stores[role];
   const game = useGame(store);
 
-  // Come back into the game automatically after a reload.
   useEffect(() => {
     store.resume();
   }, [store]);
 
+  /** Leave the game and come back to the join form in the other role. */
+  async function switchRole(to: Role) {
+    await store.leave();
+    setRole(to);
+  }
+
   const inGame = game.me && game.state;
+  const playing = game.state?.phase === 'playing';
   return (
-    <main className="page join">
-      <header className="join-header">
-        <a href="/" className="title small">dnd</a>
-        {game.code && (
-          <span className={`dot ${game.status === 'open' ? 'on' : 'off'}`} title={game.status === 'open' ? 'Connected' : 'Offline'} />
-        )}
-      </header>
+    <main className={`page join ${inGame && playing ? 'in-play' : ''}`}>
+      {!(inGame && playing) && (
+        <header className="join-header">
+          <a href="/" className="title small">dnd</a>
+          {game.code && (
+            <span className={`dot ${game.status === 'open' ? 'on' : 'off'}`} title={game.status === 'open' ? 'Connected' : 'Offline'} />
+          )}
+        </header>
+      )}
       {inGame && game.status !== 'open' && <p className="status warn">Connection lost, reconnecting…</p>}
       {game.notice && <p className="status">{game.notice}</p>}
       {game.ended === 'replaced' ? (
         <button className="primary" onClick={() => store.open(game.code!)}>Use this device instead</button>
       ) : inGame ? (
         role === 'player' ? (
-          <PlayerLobby store={store} me={game.me!} state={game.state!} />
+          playing ? (
+            <PlayerGame store={store} me={game.me!} state={game.state!} onSwitchRole={() => switchRole('dm')} />
+          ) : (
+            <PlayerLobby store={store} me={game.me!} state={game.state!} onSwitchRole={() => switchRole('dm')} />
+          )
+        ) : playing ? (
+          <DmGame store={store} state={game.state!} />
         ) : (
-          <DmLobby store={store} me={game.me!} state={game.state!} />
+          <DmLobby store={store} me={game.me!} state={game.state!} onSwitchRole={() => switchRole('player')} />
         )
       ) : (
-        <JoinForm store={store} role={role} />
+        <JoinForm store={store} role={role} onRoleChange={setRole} />
       )}
     </main>
   );
 }
 
-function JoinForm({ store, role }: { store: GameStore; role: Role }) {
+function JoinForm({ store, role, onRoleChange }: { store: GameStore; role: Role; onRoleChange: (r: Role) => void }) {
   const [code, setCode] = useState(
     () => new URLSearchParams(window.location.search).get('code')?.toUpperCase() ?? '',
   );
@@ -70,6 +93,7 @@ function JoinForm({ store, role }: { store: GameStore; role: Role }) {
   }, [code]);
 
   const dm = preview?.members.find((m) => m.role === 'dm');
+  const dmTaken = !!dm && dm.id !== clientId;
   const takenSeats = new Set(
     preview?.members.filter((m) => m.role === 'player' && m.id !== clientId).map((m) => m.seat) ?? [],
   );
@@ -79,7 +103,7 @@ function JoinForm({ store, role }: { store: GameStore; role: Role }) {
     setBusy(true);
     setError(null);
     try {
-      await store.join(code, { role, name, seat });
+      await store.join(code, { role, name, seat: role === 'player' ? seat : null });
       write('dnd.name', name.trim());
     } catch (err) {
       setError((err as Error).message);
@@ -91,7 +115,15 @@ function JoinForm({ store, role }: { store: GameStore; role: Role }) {
 
   return (
     <form className="card" onSubmit={submit}>
-      <h2>{role === 'dm' ? 'Join as Dungeon Master' : 'Join the game'}</h2>
+      <h2>Join the game</h2>
+      <div className="role-toggle" role="radiogroup" aria-label="Join as">
+        <button type="button" role="radio" aria-checked={role === 'player'} className={role === 'player' ? 'on' : ''} onClick={() => onRoleChange('player')}>
+          🛡️ Player
+        </button>
+        <button type="button" role="radio" aria-checked={role === 'dm'} className={role === 'dm' ? 'on' : ''} onClick={() => onRoleChange('dm')}>
+          📜 Dungeon Master
+        </button>
+      </div>
       <label>
         Game code
         <input
@@ -106,32 +138,40 @@ function JoinForm({ store, role }: { store: GameStore; role: Role }) {
         />
       </label>
       <label>
-        {role === 'dm' ? 'Your name' : 'Your name (you can pick a character later)'}
+        Your name
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} required />
       </label>
 
-      {role === 'dm' && dm && dm.id !== clientId && (
-        <p className="error">{dm.name} is already the Dungeon Master of this game.</p>
-      )}
+      {role === 'dm' && dmTaken && <p className="error">{dm!.name} is already the Dungeon Master of this game.</p>}
 
       {role === 'player' && preview && (
         <fieldset>
           <legend>Where are you sitting?</legend>
           <p className="hint">Match the seat numbers shown on the Main Screen.</p>
           <SeatPicker value={seat} taken={takenSeats} onChange={setSeat} />
-          <p className="hint">{seat ? `Seat ${SEATS.findIndex((s) => s.id === seat) + 1}` : 'No seat chosen: the first free one will be used.'}</p>
+          <p className="hint">{seat ? `Seat ${seatNumber(seat)}` : 'No seat chosen: the first free one will be used.'}</p>
         </fieldset>
       )}
 
       {error && <p className="error">{error}</p>}
-      <button className="primary" disabled={busy || code.length !== 4 || !name.trim()}>
-        {busy ? 'Joining…' : 'Join'}
+      <button className="primary" disabled={busy || code.length !== 4 || !name.trim() || (role === 'dm' && dmTaken)}>
+        {busy ? 'Joining…' : role === 'dm' ? 'Join as Dungeon Master' : 'Join as player'}
       </button>
     </form>
   );
 }
 
-function PlayerLobby({ store, me, state }: { store: GameStore; me: Member; state: RoomState }) {
+function PlayerLobby({
+  store,
+  me,
+  state,
+  onSwitchRole,
+}: {
+  store: GameStore;
+  me: Member;
+  state: RoomState;
+  onSwitchRole: () => void;
+}) {
   const [error, setError] = useState<string | null>(null);
   const taken = new Set(state.members.filter((m) => m.role === 'player' && m.id !== me.id).map((m) => m.seat));
   const dm = state.members.find((m) => m.role === 'dm');
@@ -148,37 +188,43 @@ function PlayerLobby({ store, me, state }: { store: GameStore; me: Member; state
         <span className="badge-dot big" style={{ background: me.color }} />
         {me.name}
       </h2>
-      <p>Waiting for the Dungeon Master to start the adventure.</p>
+      <p>Waiting for the Dungeon Master to start the campaign.</p>
       <fieldset>
         <legend>Your seat</legend>
         <SeatPicker value={me.seat} taken={taken} onChange={changeSeat} />
       </fieldset>
       {error && <p className="error">{error}</p>}
       <h3>At the table</h3>
-      <ul className="member-list">
-        <li>
-          📜 {dm ? <>{dm.name} <em>(Dungeon Master)</em>{!dm.connected && ' – away'}</> : <em>No Dungeon Master yet</em>}
-        </li>
-        {others.map((p) => (
-          <li key={p.id}>
-            <span className="badge-dot" style={{ background: p.color }} /> {p.name}
-            {!p.connected && <em> – away</em>}
-          </li>
-        ))}
-      </ul>
-      <button className="link-button" onClick={() => store.leave()}>Leave game</button>
+      <MemberList dm={dm} players={others} />
+      <div className="row-buttons">
+        <button className="link-button" onClick={onSwitchRole} disabled={!!dm}>
+          {dm ? 'There is already a Dungeon Master' : 'Be the Dungeon Master instead'}
+        </button>
+        <button className="link-button" onClick={() => store.leave()}>Leave game</button>
+      </div>
     </section>
   );
 }
 
-function DmLobby({ store, me, state }: { store: GameStore; me: Member; state: RoomState }) {
+function DmLobby({
+  store,
+  me,
+  state,
+  onSwitchRole,
+}: {
+  store: GameStore;
+  me: Member;
+  state: RoomState;
+  onSwitchRole: () => void;
+}) {
   const [error, setError] = useState<string | null>(null);
   const players = state.members.filter((m) => m.role === 'player');
   const table = state.members.find((m) => m.role === 'table');
+  const run = (p: Promise<unknown>) => p.then(() => setError(null), (e: Error) => setError(e.message));
 
   function kick(p: Member) {
     if (!confirm(`Remove ${p.name} from the game?`)) return;
-    store.request('dm:kick', { memberId: p.id }).then(() => setError(null), (e: Error) => setError(e.message));
+    run(store.request('dm:kick', { memberId: p.id }));
   }
 
   return (
@@ -188,6 +234,15 @@ function DmLobby({ store, me, state }: { store: GameStore; me: Member; state: Ro
       <p className="status-line">
         <span className={`dot ${table?.connected ? 'on' : 'off'}`} /> Main Screen {table?.connected ? 'connected' : 'offline'}
       </p>
+
+      <button className="primary" onClick={() => run(store.request('game:phase', { phase: 'playing' }))} data-testid="start-campaign">
+        ▶ Start the campaign
+      </button>
+      <p className="hint">Players can still join after the start: the join code stays visible on the Main Screen.</p>
+
+      <h3>Main Screen size</h3>
+      <CalibrationControls store={store} table={state.table} />
+
       <h3>Players ({players.length})</h3>
       {players.length === 0 && <p className="hint">Players join by scanning the QR code on the Main Screen.</p>}
       <ul className="member-list">
@@ -196,16 +251,34 @@ function DmLobby({ store, me, state }: { store: GameStore; me: Member; state: Ro
             <span className="badge-dot" style={{ background: p.color }} />
             <span className="grow">
               {p.name}
-              <span className="hint"> · Seat {SEATS.findIndex((s) => s.id === p.seat) + 1 || '–'}{!p.connected && ' · away'}</span>
+              <span className="hint"> · Seat {seatNumber(p.seat) || '–'}{!p.connected && ' · away'}</span>
             </span>
             <button className="small-button" onClick={() => kick(p)}>Remove</button>
           </li>
         ))}
       </ul>
       {error && <p className="error">{error}</p>}
-      <p className="hint">Map, characters and combat tools arrive in the next steps.</p>
-      <button className="link-button" onClick={() => store.leave()}>Leave game</button>
+      <div className="row-buttons">
+        <button className="link-button" onClick={onSwitchRole}>Join as a player instead</button>
+        <button className="link-button" onClick={() => store.leave()}>Leave game</button>
+      </div>
     </section>
+  );
+}
+
+export function MemberList({ dm, players }: { dm: Member | undefined; players: Member[] }) {
+  return (
+    <ul className="member-list">
+      <li>
+        📜 {dm ? <>{dm.name} <em>(Dungeon Master)</em>{!dm.connected && ' – away'}</> : <em>No Dungeon Master yet</em>}
+      </li>
+      {players.map((p) => (
+        <li key={p.id}>
+          <span className="badge-dot" style={{ background: p.color }} /> {p.name}
+          {!p.connected && <em> – away</em>}
+        </li>
+      ))}
+    </ul>
   );
 }
 
