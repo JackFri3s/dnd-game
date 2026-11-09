@@ -728,3 +728,89 @@ details.more summary { display: inline-flex; align-items: center; gap: 6px; padd
 details.more summary::-webkit-details-marker { display: none; }
 details.more summary::before { content: '▸'; }
 details.more[open] summary::before { content: '▾'; }
+
+/* ---------- Places (generated maps) ---------- */
+:root {
+  --pl-grass: #f3f3f0; --pl-road: #dedcd6; --pl-road-edge: #c4c2bb; --pl-water: #cdd9e0; --pl-bank: #b2c0c9;
+  --pl-building: #c9c9c9; --pl-ink: #3a3a3a; --pl-tree: #dfe3da; --pl-tree-ink: #9da396; --pl-field: #ebebe3;
+  --pl-rock: #b0b0b0; --pl-cave-rock: #4a4a4a; --pl-cave-floor: #efefec; --pl-floor: #f7f6f2; --pl-outside: #e3e3df;
+  --pl-furniture: #d8d6cf; --pl-label: #333333;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --pl-grass: #1d1f1c; --pl-road: #2e2d2a; --pl-road-edge: #3c3b37; --pl-water: #1f2a31; --pl-bank: #2b3840;
+    --pl-building: #4a4a4a; --pl-ink: #cfcfcf; --pl-tree: #263024; --pl-tree-ink: #4c5a47; --pl-field: #232520;
+    --pl-rock: #555555; --pl-cave-rock: #0d0d0d; --pl-cave-floor: #2a2a28; --pl-floor: #2c2b28; --pl-outside: #181816;
+    --pl-furniture: #3e3c37; --pl-label: #e6e6e6;
+  }
+}
+:root[data-theme='dark'] {
+  --pl-grass: #1d1f1c; --pl-road: #2e2d2a; --pl-road-edge: #3c3b37; --pl-water: #1f2a31; --pl-bank: #2b3840;
+  --pl-building: #4a4a4a; --pl-ink: #cfcfcf; --pl-tree: #263024; --pl-tree-ink: #4c5a47; --pl-field: #232520;
+  --pl-rock: #555555; --pl-cave-rock: #0d0d0d; --pl-cave-floor: #2a2a28; --pl-floor: #2c2b28; --pl-outside: #181816;
+  --pl-furniture: #3e3c37; --pl-label: #e6e6e6;
+}
+:root[data-style='parchment'] {
+  --pl-grass: #e6dcb8; --pl-road: #d8c69d; --pl-road-edge: #b39f74; --pl-water: #a9c1bd; --pl-bank: #86a099;
+  --pl-building: #c79f73; --pl-ink: #3b2a1a; --pl-tree: #b3b884; --pl-tree-ink: #6f7448; --pl-field: #ddd0a2;
+  --pl-rock: #a8957a; --pl-cave-rock: #5e4a33; --pl-cave-floor: #efe3c5; --pl-floor: #f1e6c9; --pl-outside: #d9cba5;
+  --pl-furniture: #c4a57c; --pl-label: #3b2a1a;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-style='parchment']:not([data-theme='light']) {
+    --pl-grass: #2b2720; --pl-road: #3a3226; --pl-road-edge: #4b4031; --pl-water: #26332f; --pl-bank: #34443f;
+    --pl-building: #5b4632; --pl-ink: #e8d9bc; --pl-tree: #343722; --pl-tree-ink: #5d6140; --pl-field: #312c22;
+    --pl-rock: #4a3f31; --pl-cave-rock: #100d0a; --pl-cave-floor: #3a3228; --pl-floor: #3a3228; --pl-outside: #241f19;
+    --pl-furniture: #54452f; --pl-label: #efe4cf;
+  }
+}
+:root[data-style='parchment'][data-theme='dark'] {
+  --pl-grass: #2b2720; --pl-road: #3a3226; --pl-road-edge: #4b4031; --pl-water: #26332f; --pl-bank: #34443f;
+  --pl-building: #5b4632; --pl-ink: #e8d9bc; --pl-tree: #343722; --pl-tree-ink: #5d6140; --pl-field: #312c22;
+  --pl-rock: #4a3f31; --pl-cave-rock: #100d0a; --pl-cave-floor: #3a3228; --pl-floor: #3a3228; --pl-outside: #241f19;
+  --pl-furniture: #54452f; --pl-label: #efe4cf;
+}
+.place polyline, .place line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.place-ground.ground-grass { fill: var(--pl-grass); }
+.place-ground.ground-floor { fill: var(--pl-outside); }
+.place-ground.ground-rock { fill: var(--pl-cave-rock); }
+.place-field { fill: var(--pl-field); stroke: var(--pl-tree-ink); stroke-width: 0.06; stroke-dasharray: 0.5 0.25; }
+.place-water { stroke: var(--pl-water); }
+.place-water-bank { stroke: var(--pl-bank); }
+.place-road { stroke: var(--pl-road); }
+.place-road-edge { stroke: var(--pl-road-edge); }
+.place-square { fill: var(--pl-road); stroke: var(--pl-road-edge); stroke-width: 0.08; }
+.place-bridge { stroke: var(--pl-road); stroke-linecap: butt !important; }
+.place-bridge-edge { stroke: var(--pl-ink); stroke-linecap: butt !important; }
+.place-building { fill: var(--pl-building); stroke: var(--pl-ink); stroke-width: 0.16; stroke-linejoin: round; }
+.place-building.b-inn, .place-building.b-hall, .place-building.b-temple { fill: color-mix(in srgb, var(--pl-building) 80%, var(--pl-ink) 20%); }
+.place-building.ruined { fill: none; stroke-dasharray: 0.6 0.35; }
+.place-tree { fill: var(--pl-tree); stroke: var(--pl-tree-ink); stroke-width: 0.08; }
+.place-rock { fill: var(--pl-rock); stroke: var(--pl-ink); stroke-width: 0.1; stroke-linejoin: round; }
+.place-fence { stroke: var(--pl-ink); stroke-width: 0.08; stroke-dasharray: 0.3 0.2; opacity: 0.7; }
+.place-well { fill: var(--pl-water); stroke: var(--pl-ink); stroke-width: 0.14; }
+.place-floor { fill: var(--pl-floor); }
+.place-cave-floor { fill: var(--pl-cave-floor); fill-rule: evenodd; }
+.place-wall { stroke: var(--pl-ink); stroke-width: 0.3; }
+.place-cave .place-wall { stroke-width: 0.45; }
+.place-furniture { fill: var(--pl-furniture); stroke: var(--pl-ink); stroke-width: 0.06; }
+.place-furniture.f-hearth, .place-furniture.f-forge, .place-furniture.f-oven { fill: color-mix(in srgb, var(--pl-furniture) 60%, var(--range) 40%); }
+.place-furniture.f-altar { fill: color-mix(in srgb, var(--pl-furniture) 70%, var(--spell) 30%); }
+.place-label { fill: var(--pl-label); text-anchor: middle; font-family: var(--font-display); font-weight: 600; paint-order: stroke; stroke: var(--pl-grass); stroke-width: 0.12; }
+.place-label.pl-title { letter-spacing: 0.15em; stroke-width: 0.3; }
+.place-label.pl-room { opacity: 0.55; letter-spacing: 0.08em; stroke: var(--pl-floor); stroke-width: 0.06; }
+.place-label.pl-small { stroke: var(--pl-building); stroke-width: 0.1; }
+.entrance .entrance-dot { fill: var(--bg); stroke: var(--path); stroke-width: 0.1; }
+.entrance.selected .entrance-dot { fill: var(--path); }
+.entrance.selected .entrance-icon { fill: #fff; }
+.entrance.hidden { opacity: 0.6; }
+.entrance.hidden .entrance-dot { stroke-dasharray: 0.15 0.1; }
+.entrance-icon { fill: var(--path); text-anchor: middle; font-weight: 700; pointer-events: none; }
+.entrance-name { fill: var(--text); text-anchor: middle; font-family: Inter, system-ui, sans-serif; font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 0.1; pointer-events: none; }
+.entrance.tappable { cursor: pointer; }
+.map-board.aiming .entrances { pointer-events: none; }
+.encounter-ring { fill: var(--range); fill-opacity: 0.08; stroke: var(--range); stroke-width: 0.08; stroke-dasharray: 0.3 0.2; }
+.encounter-text { fill: var(--range); text-anchor: middle; font-family: Inter, system-ui, sans-serif; font-weight: 700; pointer-events: none; }
+.encounter-mark { pointer-events: none; }
+.preview-banner { position: absolute; top: 8px; left: 50%; translate: -50% 0; z-index: 2; background: var(--path); color: #fff; padding: 6px 14px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; pointer-events: none; white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; }
+.entrance-bar { display: flex; align-items: center; gap: 10px; }

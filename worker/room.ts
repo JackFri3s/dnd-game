@@ -26,10 +26,15 @@ import {
   type Combat,
   type RollOutcome,
   type TokenStats,
+  type StoredPlace,
 } from '../shared/protocol.ts';
-import type { CampaignExport } from './campaign.ts';
+import { crossesWall, publicPlace, summarize, type Npc, type PlaceContext, type PlaceKind } from '../shared/places.ts';
+import { generateFor, generatePlace } from '../shared/generate.ts';
+import type { CampaignExport, SnapshotWorld } from './campaign.ts';
 import { checkHomebrew, emptyHomebrew, DAMAGE_TYPES, WEAPON_PROPERTIES, SCHOOLS, type Homebrew, type HomebrewKind } from '../shared/homebrew.ts';
 import { MIN_TOKEN_GAP, clampToBoard, dist, freeSpotNear, fromHex, onBoard, type Point } from '../shared/geometry.ts';
+
+const MAX_PLACES = 300;
 
 /** A game nobody has connected to for this long is deleted. */
 const INACTIVE_GAME_TTL_MS = 180 * 24 * 60 * 60 * 1000; // ~6 months
@@ -54,6 +59,10 @@ interface StoredRoom {
   areas: Area[];
   homebrew: Homebrew;
   combat: Combat | null;
+  places: Record<string, StoredPlace>;
+  placeId: string;
+  /** Goes up whenever the current place changes, so devices know to fetch it again. */
+  placeRev: number;
 }
 
 const KEY_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -61,7 +70,28 @@ const KEY_LENGTH = 10;
 
 function emptyWorld(): World {
   const board = DEFAULT_BOARD;
-  return { board, tokens: {}, view: { x: board.w / 2, y: board.h / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [], homebrew: emptyHomebrew(), combat: null };
+  const first = blankPlace('p1', board);
+  return { board, tokens: {}, view: { x: board.w / 2, y: board.h / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [], homebrew: emptyHomebrew(), combat: null, places: { [first.id]: first }, placeId: first.id };
+}
+
+/** The plain map every campaign starts with (and older campaigns get). */
+function blankPlace(id: string, board: { w: number; h: number }): StoredPlace {
+  return {
+    id,
+    name: 'Open ground',
+    kind: 'blank',
+    seed: 0,
+    parentId: null,
+    parentEntranceId: null,
+    size: { w: board.w, h: board.h },
+    ground: 'paper',
+    features: [],
+    walls: [],
+    entrances: [],
+    npcs: [],
+    start: { x: board.w / 2, y: board.h / 2 },
+    context: { description: '', mood: 'peaceful', size: 'medium', level: 1 },
+  };
 }
 
 /**
@@ -88,6 +118,12 @@ function migrateWorld<T extends Partial<World>>(w: T): T {
     if (o.q !== undefined) a.origin = fromHex(o.q, o.r!);
     if (t.q !== undefined) a.target = fromHex(t.q, t.r!);
   }
+  // Worlds from before places existed: their board becomes the first place.
+  if (!w.places || !Object.keys(w.places).length || !w.placeId || !w.places[w.placeId]) {
+    const first = blankPlace(w.placeId ?? 'p1', w.board ?? DEFAULT_BOARD);
+    w.places = { ...(w.places ?? {}), [first.id]: first };
+    w.placeId = first.id;
+  }
   return w;
 }
 
@@ -102,6 +138,8 @@ function worldOf(room: StoredRoom): World {
     areas: room.areas,
     homebrew: room.homebrew,
     combat: room.combat,
+    places: room.places,
+    placeId: room.placeId,
   };
 }
 
@@ -116,6 +154,9 @@ function applyWorld(room: StoredRoom, world: World) {
   room.areas = world.areas ?? [];
   room.homebrew = { ...emptyHomebrew(), ...(world.homebrew ?? {}) };
   room.combat = world.combat ?? null;
+  room.places = world.places;
+  room.placeId = world.placeId;
+  room.placeRev = (room.placeRev ?? 0) + 1;
 }
 
 const DEFAULT_BOARD = { w: 40, h: 25 };
@@ -135,6 +176,9 @@ function withDefaults(room: Partial<StoredRoom> & Pick<StoredRoom, 'code' | 'tab
     rolls: [],
     areas: [],
     combat: null,
+    places: {},
+    placeId: 'p1',
+    placeRev: 1,
     ...room,
     homebrew: { ...emptyHomebrew(), ...(room.homebrew ?? {}) },
     board,
@@ -150,6 +194,7 @@ function withDefaults(room: Partial<StoredRoom> & Pick<StoredRoom, 'code' | 'tab
 }
 interface Attachment {
   clientId: string;
+  placeRev?: number; // the version of the current place this device has
 }
 
 /** Mistakes caused by the user (shown to them as a friendly message). */
@@ -176,6 +221,7 @@ export class GameRoom extends DurableObject<Env> {
         [tableId]: { id: tableId, role: 'table', name: 'Main Screen', seat: null, color: '' },
       },
     });
+    for (const id of Object.keys(this.room.places)) this.changedPlaces.add(id);
     await this.save();
     return true;
   }
@@ -253,6 +299,7 @@ export class GameRoom extends DurableObject<Env> {
     switch (msg.type) {
       case 'rejoin': {
         if (!me) throw new GameError('You are no longer in this game.');
+        ws.serializeAttachment({ clientId } satisfies Attachment);
         this.broadcast(room);
         await this.scheduleCleanup();
         return { member: this.toMember(me) } satisfies Requests['rejoin']['result'];
@@ -260,6 +307,7 @@ export class GameRoom extends DurableObject<Env> {
 
       case 'join': {
         const member = this.join(room, clientId, msg);
+        ws.serializeAttachment({ clientId } satisfies Attachment);
         await this.commit(room);
         return { member: this.toMember(member) } satisfies Requests['join']['result'];
       }
@@ -347,6 +395,8 @@ export class GameRoom extends DurableObject<Env> {
         const spot = clampToBoard(to, room.board);
         const blocker = Object.values(room.tokens).find((t) => t.id !== token.id && dist(t, spot) < MIN_TOKEN_GAP);
         if (blocker) throw new GameError(`${blocker.name} is in the way.`);
+        // Walls block players (the DM can put tokens anywhere).
+        if (me.role === 'player' && crossesWall(room.places[room.placeId], token, spot)) throw new GameError('A wall is in the way.');
         // In combat, movement is counted per turn; players may only move on their own turn.
         const combat = room.combat;
         if (combat && combat.round > 0) {
@@ -923,7 +973,9 @@ export class GameRoom extends DurableObject<Env> {
         if (!world) throw new GameError('Save point not found.');
         // Keep a safety copy of the current situation first, so a restore can be undone.
         await stub.snapshot('Before restoring a save point', worldOf(room), true);
+        const oldIds = Object.keys(room.places);
         applyWorld(room, world);
+        this.replacedWorld(room, oldIds);
         if (room.phase === 'playing') {
           for (const m of Object.values(room.members)) if (m.role === 'player') ensurePlayerToken(room, m);
         }
@@ -949,11 +1001,144 @@ export class GameRoom extends DurableObject<Env> {
         const campaign = await this.createCampaign(data.name, data.world);
         const stub = this.campaignStub(campaign.key);
         for (const snap of data.snapshots.slice().reverse()) {
-          await stub.snapshot(snap.info.name, snap.world, snap.info.auto, snap.info.at);
+          await stub.snapshot(snap.info.name, snap.world as World, snap.info.auto, snap.info.at);
         }
         await this.dmIndex(clientId).add(campaign.key);
         await this.loadCampaign(room, campaign.key);
         return { campaign } satisfies Requests['campaign:import']['result'];
+      }
+
+      // ---------- places ----------
+
+      case 'place:generate': {
+        requireRole(me, 'dm');
+        if (Object.keys(room.places).length >= MAX_PLACES) throw new GameError(`A campaign can have up to ${MAX_PLACES} places. Delete some first.`);
+        const context = sanitizeContext(msg.context);
+        const seed = Math.floor(num(msg.seed, 0, 2 ** 31));
+        const name = cleanTitle(msg.name);
+        const id = newPlaceId(room);
+        let place: StoredPlace;
+        if (msg.entranceId) {
+          const here = room.places[room.placeId];
+          const entrance = here.entrances.find((e) => e.id === msg.entranceId);
+          if (!entrance) throw new GameError('Entrance not found.');
+          if (entrance.kind === 'exit') throw new GameError('That is the way back out.');
+          if (entrance.targetId && room.places[entrance.targetId]) throw new GameError('That place has been made already.');
+          const made = generateFor(entrance, here, seed, context);
+          place = { ...made, ...(name ? { name } : {}), id, parentId: here.id, parentEntranceId: entrance.id };
+          for (const e of place.entrances) if (e.kind === 'exit') e.targetId = here.id;
+          // The people who live or work there are found inside.
+          if (entrance.kind === 'building') {
+            place.npcs = here.npcs.filter((n) => n.entranceId === entrance.id).map(({ entranceId: _, ...n }) => n);
+            here.npcs = here.npcs.filter((n) => n.entranceId !== entrance.id);
+          }
+          entrance.targetId = id;
+          this.touchPlace(room, here.id);
+        } else {
+          const kind: PlaceKind = (['village', 'building', 'cave', 'blank'] as const).find((k) => k === msg.kind) ?? 'blank';
+          const building = BUILDING_KINDS.find((b) => b === msg.building) ?? 'house';
+          place = { ...generatePlace(kind, seed, context, name || undefined, building), id, parentId: null, parentEntranceId: null };
+        }
+        room.places[id] = roundNumbers(place);
+        this.touchPlace(room, id);
+        if (msg.go) this.goTo(room, id);
+        await this.commit(room);
+        return { placeId: id } satisfies Requests['place:generate']['result'];
+      }
+
+      case 'place:go': {
+        requireRole(me, 'dm');
+        if (!room.places[msg.placeId]) throw new GameError('Place not found.');
+        this.goTo(room, msg.placeId);
+        return this.commit(room);
+      }
+
+      case 'place:enter': {
+        if (!me || me.role === 'table') throw new GameError('Not allowed.');
+        const here = room.places[room.placeId];
+        const entrance = here.entrances.find((e) => e.id === msg.entranceId && (me.role === 'dm' || !e.hidden));
+        if (!entrance) throw new GameError('Entrance not found.');
+        if (me.role === 'player') {
+          const who = Object.values(room.characters).find((c) => c.ownerId === me.id)?.name || me.name;
+          const text = entrance.kind === 'exit' ? `${who} wants to leave (${entrance.name}).` : `${who} wants to go into ${entrance.name}.`;
+          this.notifyRole(room, 'dm', text);
+          return null;
+        }
+        const target = entrance.kind === 'exit' ? (entrance.targetId ?? here.parentId) : entrance.targetId;
+        if (!target || !room.places[target]) throw new GameError(entrance.kind === 'exit' ? 'This place has nothing outside it yet.' : 'Nothing has been made behind this yet.');
+        this.goTo(room, target);
+        return this.commit(room);
+      }
+
+      case 'place:update': {
+        requireRole(me, 'dm');
+        const place = room.places[msg.placeId];
+        if (!place) throw new GameError('Place not found.');
+        if (msg.name !== undefined) {
+          const name = cleanTitle(msg.name);
+          if (name) {
+            for (const f of place.features) if (f.t === 'label' && f.text === place.name) f.text = name;
+            // the entrance that leads here takes the new name too
+            const parent = place.parentId ? room.places[place.parentId] : undefined;
+            const door = parent?.entrances.find((e) => e.id === place.parentEntranceId);
+            if (parent && door) {
+              for (const f of parent.features) if (f.t === 'building' && f.label === door.name) f.label = name;
+              door.name = name;
+              this.touchPlace(room, parent.id);
+            }
+            place.name = name;
+          }
+        }
+        if (msg.description !== undefined) place.context.description = String(msg.description).slice(0, 500);
+        if (msg.npcs !== undefined) place.npcs = sanitizeNpcs(msg.npcs);
+        if (msg.encounters !== undefined) {
+          place.encounters = (Array.isArray(msg.encounters) ? msg.encounters : []).slice(0, 30).flatMap((e) =>
+            typeof e?.monster === 'string' && /^[a-z0-9-]{1,60}$/.test(e.monster)
+              ? [{ monster: e.monster, count: Math.round(num(e.count, 1, 20)), x: num(e.x, 0, place.size.w), y: num(e.y, 0, place.size.h) }]
+              : [],
+          );
+        }
+        if (msg.entrance) {
+          const e = place.entrances.find((x) => x.id === msg.entrance!.entranceId);
+          if (!e) throw new GameError('Entrance not found.');
+          if (msg.entrance.name !== undefined) e.name = cleanTitle(msg.entrance.name) || e.name;
+          if (msg.entrance.hidden !== undefined) e.hidden = !!msg.entrance.hidden || undefined;
+        }
+        this.touchPlace(room, place.id);
+        return this.commit(room);
+      }
+
+      case 'place:delete': {
+        requireRole(me, 'dm');
+        if (!room.places[msg.placeId]) throw new GameError('Place not found.');
+        // The place and everything inside it (its buildings, cellars, deeper caves...).
+        const doomed = new Set([msg.placeId]);
+        for (let grew = true; grew; ) {
+          grew = false;
+          for (const p of Object.values(room.places)) {
+            if (p.parentId && doomed.has(p.parentId) && !doomed.has(p.id)) {
+              doomed.add(p.id);
+              grew = true;
+            }
+          }
+        }
+        if (doomed.has(room.placeId)) throw new GameError('The party is there right now. Take them somewhere else first.');
+        for (const id of doomed) {
+          delete room.places[id];
+          this.removedPlaces.add(id);
+          this.changedPlaces.delete(id);
+        }
+        for (const p of Object.values(room.places)) {
+          let changed = false;
+          for (const e of p.entrances) {
+            if (e.targetId && doomed.has(e.targetId)) {
+              e.targetId = null;
+              changed = true;
+            }
+          }
+          if (changed) this.touchPlace(room, p.id);
+        }
+        return this.commit(room);
       }
 
       default:
@@ -993,31 +1178,105 @@ export class GameRoom extends DurableObject<Env> {
     return member;
   }
 
+  // ---------- places ----------
+
+  /** Places saved since the last save (each place is stored under its own key). */
+  private changedPlaces = new Set<string>();
+  private removedPlaces = new Set<string>();
+
+  private touchPlace(room: StoredRoom, id: string) {
+    this.changedPlaces.add(id);
+    if (id === room.placeId) room.placeRev++;
+  }
+
+  /** The party moves to another place; monsters and NPCs stay behind in theirs. */
+  private goTo(room: StoredRoom, destId: string) {
+    if (destId === room.placeId) return;
+    if (room.combat) throw new GameError('End the fight before moving on.');
+    const here = room.places[room.placeId];
+    const dest = room.places[destId];
+    // Arrive by the way you came: going back out puts you at the door you went in by.
+    const door = here.parentId === dest.id ? dest.entrances.find((e) => e.id === here.parentEntranceId) : undefined;
+    const at: Point = door ? { x: door.x, y: door.y } : dest.start;
+    const party = Object.values(room.tokens).filter((t) => t.kind === 'player');
+    here.parked = {
+      tokens: Object.fromEntries(Object.values(room.tokens).filter((t) => t.kind !== 'player').map((t) => [t.id, t])),
+      areas: room.areas,
+    };
+    room.tokens = { ...(dest.parked?.tokens ?? {}) };
+    room.areas = dest.parked?.areas ?? [];
+    delete dest.parked;
+    room.placeId = dest.id;
+    room.board = { ...dest.size };
+    room.highlight = null;
+    for (const t of party) {
+      const spot = freeSpotNear(at, Object.values(room.tokens), room.board, (p) => crossesWall(dest, at, p));
+      Object.assign(t, spot);
+      room.tokens[t.id] = t;
+    }
+    room.view = clampToBoard(at, room.board);
+    this.touchPlace(room, here.id);
+    this.touchPlace(room, dest.id);
+    room.placeRev++;
+  }
+
+  private notifyRole(room: StoredRoom, role: Member['role'], text: string) {
+    for (const s of this.ctx.getWebSockets()) {
+      const { clientId } = s.deserializeAttachment() as Attachment;
+      if (room.members[clientId]?.role === role) send(s, { type: 'notice', text });
+    }
+  }
+
   // ---------- helpers ----------
 
   private async load(): Promise<StoredRoom | null> {
     if (this.room === undefined) {
       const stored = await this.ctx.storage.get<StoredRoom>('room');
-      this.room = stored ? withDefaults(stored) : null;
+      if (stored) {
+        const places = await this.ctx.storage.list<StoredPlace>({ prefix: 'place:' });
+        stored.places = Object.fromEntries([...places.values()].map((p) => [p.id, p]));
+        const before = new Set(Object.keys(stored.places));
+        this.room = withDefaults(stored);
+        // Places made by the migration of an older game still need saving.
+        for (const id of Object.keys(this.room.places)) if (!before.has(id)) this.changedPlaces.add(id);
+      } else this.room = null;
     }
     return this.room;
   }
 
   private async save() {
-    await this.ctx.storage.put('room', this.room);
+    const room = this.room;
+    if (!room) return;
+    const { places, ...rest } = room;
+    const entries: Record<string, unknown> = { room: { ...rest, places: {} } };
+    for (const id of this.changedPlaces) if (places[id]) entries[`place:${id}`] = places[id];
+    const keys = Object.keys(entries);
+    for (let i = 0; i < keys.length; i += 100) await this.ctx.storage.put(Object.fromEntries(keys.slice(i, i + 100).map((k) => [k, entries[k]])));
+    if (this.removedPlaces.size) await this.ctx.storage.delete([...this.removedPlaces].map((id) => `place:${id}`));
+    this.changedPlaces.clear();
+    this.removedPlaces.clear();
     await this.scheduleCleanup();
+  }
+
+  /** A whole new world was loaded (campaign opened, save point restored...): every place is saved again. */
+  private replacedWorld(room: StoredRoom, oldIds: string[]) {
+    for (const id of oldIds) if (!room.places[id]) this.removedPlaces.add(id);
+    for (const id of Object.keys(room.places)) this.changedPlaces.add(id);
   }
 
   /** Saves the game (and its campaign) and sends the new state to everyone. */
   private async commit(room: StoredRoom, except?: WebSocket): Promise<null> {
     if (room.campaign) {
-      const saved = await this.campaignStub(room.campaign.key).saveWorld(room.code, worldOf(room));
+      const changed = [...this.changedPlaces].map((id) => room.places[id]).filter(Boolean);
+      const saved = await this.campaignStub(room.campaign.key).saveWorld(room.code, { ...worldOf(room), places: {} }, changed, [...this.removedPlaces]);
       if (!saved) {
         // The campaign was opened in another game since: this game must stop using it.
         const name = room.campaign.name;
         room.campaign = null;
         room.phase = 'lobby';
+        const oldIds = Object.keys(room.places);
         applyWorld(room, emptyWorld());
+        this.replacedWorld(room, oldIds);
         this.notify(room, `"${name}" was opened in another game, so it was closed here.`);
       }
     }
@@ -1113,7 +1372,9 @@ export class GameRoom extends DurableObject<Env> {
     const opened = await this.campaignStub(key).open(room.code);
     if (!opened) throw new GameError('No campaign found with that key.');
     room.campaign = { key, name: opened.summary.name };
+    const oldIds = Object.keys(room.places);
     applyWorld(room, opened.world);
+    this.replacedWorld(room, oldIds);
     if (room.phase === 'playing') {
       for (const m of Object.values(room.members)) if (m.role === 'player') ensurePlayerToken(room, m);
     }
@@ -1150,16 +1411,42 @@ export class GameRoom extends DurableObject<Env> {
       areas: room.areas,
       homebrew: room.homebrew,
       combat: room.combat,
+      placeId: room.placeId,
+      placeRev: room.placeRev,
+      places: [],
     };
   }
 
-  /** Sends the latest game state to every connected device (except a closing one). */
+  /**
+   * Sends the latest game state to every connected device (except a closing one).
+   * The map of the current place is only sent to devices that don't have this version yet,
+   * and players and the Main Screen get it without the DM's secrets.
+   */
   private broadcast(room: StoredRoom, except?: WebSocket) {
-    const msg: ServerMessage = { type: 'room:state', state: this.state(room, except) };
+    const base = this.state(room, except);
+    const { parked: _, ...current } = room.places[room.placeId];
+    const forDm = { ...base, places: Object.values(room.places).map(summarize) };
+    const cache = new Map<string, string>();
+    const message = (dm: boolean, withPlace: boolean) => {
+      const key = `${dm}-${withPlace}`;
+      if (!cache.has(key)) {
+        const state: RoomState = { ...(dm ? forDm : base), ...(withPlace ? { place: dm ? current : publicPlace(current) } : {}) };
+        cache.set(key, JSON.stringify({ type: 'room:state', state } satisfies ServerMessage));
+      }
+      return cache.get(key)!;
+    };
     for (const s of this.ctx.getWebSockets()) {
       if (s === except) continue;
-      const { clientId } = s.deserializeAttachment() as Attachment;
-      if (room.members[clientId]) send(s, msg); // only devices that joined see the game
+      const att = s.deserializeAttachment() as Attachment;
+      const member = room.members[att.clientId];
+      if (!member) continue; // only devices that joined see the game
+      const withPlace = att.placeRev !== room.placeRev;
+      try {
+        s.send(message(member.role === 'dm', withPlace));
+        if (withPlace) s.serializeAttachment({ ...att, placeRev: room.placeRev } satisfies Attachment);
+      } catch {
+        // socket already closed
+      }
     }
   }
 }
@@ -1188,6 +1475,42 @@ function firstFreeSeat(room: StoredRoom, clientId: string): SeatId | null {
 function assertSeatFree(room: StoredRoom, seat: SeatId, clientId: string) {
   if (!SEATS.some((s) => s.id === seat)) throw new GameError('Unknown seat.');
   if (takenSeats(room, clientId).has(seat)) throw new GameError('That seat is taken.');
+}
+
+// ---------- places ----------
+
+const BUILDING_KINDS = ['house', 'inn', 'smithy', 'temple', 'shop', 'farm', 'hall', 'ruin'] as const;
+
+function newPlaceId(room: StoredRoom) {
+  for (let n = Object.keys(room.places).length + 1; ; n++) if (!room.places[`p${n}`]) return `p${n}`;
+}
+
+function sanitizeContext(raw: unknown): PlaceContext {
+  const c = (raw && typeof raw === 'object' ? raw : {}) as Partial<PlaceContext>;
+  return {
+    description: typeof c.description === 'string' ? c.description.slice(0, 500) : '',
+    mood: typeof c.mood === 'string' ? c.mood.slice(0, 40) : 'peaceful',
+    size: c.size === 'small' || c.size === 'large' ? c.size : 'medium',
+    level: Math.round(num(c.level ?? 1, 1, 20)),
+  };
+}
+
+function sanitizeNpcs(raw: unknown): Npc[] {
+  const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
+  return (Array.isArray(raw) ? raw : []).slice(0, 80).map((n, i) => ({
+    id: str(n?.id, 40) || `n${Date.now().toString(36)}${i}`,
+    name: str(n?.name, 60) || 'Someone',
+    role: str(n?.role, 60),
+    personality: str(n?.personality, 200),
+    look: str(n?.look, 200),
+    secret: str(n?.secret, 300),
+    ...(typeof n?.entranceId === 'string' ? { entranceId: n.entranceId.slice(0, 40) } : {}),
+  }));
+}
+
+/** Generated maps have long decimals; two places are plenty (and keep saves small). */
+function roundNumbers<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value, (_k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v)));
 }
 
 // ---------- tokens ----------
@@ -1407,14 +1730,36 @@ function parseExport(data: unknown): CampaignExport {
     w.board.w > 0 && w.board.w <= 2000 && w.board.h > 0 && w.board.h <= 2000 &&
     w.tokens && typeof w.tokens === 'object' && w.view && Number.isFinite(w.view.x) && Number.isFinite(w.view.y) &&
     Number.isInteger(w.nextTokenId);
-  if (!d || d.format !== 'dnd-campaign' || d.version !== 1 || !validWorld(d.world)) {
+  if (!d || d.format !== 'dnd-campaign' || (d.version !== 1 && d.version !== 2) || !validWorld(d.world)) {
     throw new GameError('This file is not a campaign backup from this app.');
+  }
+  // Version 2 files keep each place once; put the places back into each save point.
+  const versions = d.placeVersions && typeof d.placeVersions === 'object' ? d.placeVersions : {};
+  const full = (w: World | SnapshotWorld): World => {
+    if (!('placeRefs' in w) || !w.placeRefs) return w as World;
+    const { placeRefs, ...rest } = w;
+    const places = Object.fromEntries(Object.entries(placeRefs).flatMap(([id, hash]) => (versions[hash] ? [[id, versions[hash]]] : [])));
+    return { ...rest, places } as World;
+  };
+  for (const p of [d.world, ...(Array.isArray(d.snapshots) ? d.snapshots.map((x) => x?.world) : [])]) {
+    if (p && typeof p === 'object' && 'places' in p && p.places) for (const place of Object.values(p.places)) checkPlace(place);
   }
   return {
     ...d,
+    version: 1,
+    placeVersions: undefined,
     name: cleanTitle(d.name) || 'Imported campaign',
-    snapshots: Array.isArray(d.snapshots) ? d.snapshots.filter((s) => s?.info && validWorld(s.world)).slice(0, 200) : [],
+    snapshots: Array.isArray(d.snapshots) ? d.snapshots.filter((s) => s?.info && s.world).map((s) => ({ ...s, world: full(s.world) })).filter((s) => validWorld(s.world as World)).slice(0, 200) : [],
   };
+}
+
+/** A place from an uploaded file: just enough checking that it can't break the game. */
+function checkPlace(p: StoredPlace) {
+  const ok =
+    p && typeof p.id === 'string' && typeof p.name === 'string' && p.size && Number.isFinite(p.size.w) && Number.isFinite(p.size.h) &&
+    p.size.w > 0 && p.size.w <= 2000 && p.size.h > 0 && p.size.h <= 2000 &&
+    Array.isArray(p.features) && Array.isArray(p.walls) && Array.isArray(p.entrances) && Array.isArray(p.npcs) && p.start && p.context;
+  if (!ok) throw new GameError('This backup has a damaged map in it.');
 }
 
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;

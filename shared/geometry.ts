@@ -45,8 +45,8 @@ export function inRange(from: Point, target: Point, rangeFt: number) {
 }
 
 /** The nearest free spot to `start` where a token fits without overlapping others. */
-export function freeSpotNear(start: Point, taken: Point[], board: BoardSize): Point {
-  const ok = (p: Point) => onBoard(p, board) && taken.every((t) => dist(t, p) >= MIN_TOKEN_GAP + 0.05);
+export function freeSpotNear(start: Point, taken: Point[], board: BoardSize, avoid?: (p: Point) => boolean): Point {
+  const ok = (p: Point) => onBoard(p, board) && taken.every((t) => dist(t, p) >= MIN_TOKEN_GAP + 0.05) && !avoid?.(p);
   const s = clampToBoard(start, board);
   if (ok(s)) return s;
   for (let ring = 1; ring < 40; ring++) {

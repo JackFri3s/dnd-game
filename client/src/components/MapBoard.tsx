@@ -14,6 +14,8 @@ import {
 } from '../../../shared/geometry.ts';
 import { SIDE_ROTATION } from '../seats.ts';
 import { formatDistance, useSettings } from '../settings.ts';
+import type { Entrance } from '../../../shared/places.ts';
+import { EntranceMarkers, PlaceLayer } from './PlaceLayer.tsx';
 
 export interface Camera {
   x: number; // centre of the view, in map units (1 unit = 5 ft)
@@ -49,6 +51,9 @@ interface Props {
   showHp?: boolean;
   /** A range shown only on this screen (dashed), before it is shown on the table. */
   localHighlight?: Highlight | null;
+  /** Tapping a door, cave mouth or stairs. */
+  onTapEntrance?: (entrance: Entrance) => void;
+  selectedEntranceId?: string | null;
 }
 
 const MIN_SCALE = 8;
@@ -79,6 +84,8 @@ export function MapBoard({
   currentTokenId,
   showHp,
   localHighlight,
+  onTapEntrance,
+  selectedEntranceId,
 }: Props) {
   const { unit } = useSettings();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -108,6 +115,9 @@ export function MapBoard({
       return next;
     });
   }, [state.tokens]);
+
+  // Another place: nothing from the old map is pending any more.
+  useEffect(() => setPending({}), [state.placeId]);
 
   const toMap = (clientX: number, clientY: number): Point => {
     const rect = svgRef.current!.getBoundingClientRect();
@@ -268,6 +278,7 @@ export function MapBoard({
           </radialGradient>
         </defs>
         <rect className="board-bg" x={0} y={0} width={state.board.w} height={state.board.h} rx={0.2} />
+        {state.place && <PlaceLayer place={state.place} />}
         <rect className="board-tex" x={0} y={0} width={state.board.w} height={state.board.h} fill="url(#board-stains)" />
         <rect className="board-tex" x={0} y={0} width={state.board.w} height={state.board.h} fill="url(#board-grain)" />
         <rect className="board-vignette" x={0} y={0} width={state.board.w} height={state.board.h} fill="url(#board-vignette)" />
@@ -292,6 +303,7 @@ export function MapBoard({
           <path key={area.id} className="area" d={d} strokeWidth={1.5 * px} data-testid={`area-${area.label}`} />
         ))}
         {previewPath && <path className="area preview" d={previewPath} strokeWidth={2 * px} data-testid="area-preview" />}
+        {state.place && <EntranceMarkers place={state.place} scale={camera.scale} selectedId={selectedEntranceId} onTap={onTapMap ? undefined : onTapEntrance} />}
         {drag && dragInfo && (
           <line className={`move-line ${dragInfo.over || dragInfo.blocked ? 'over' : ''}`} x1={drag.from.x} y1={drag.from.y} x2={drag.at.x} y2={drag.at.y} strokeWidth={4 * px} />
         )}

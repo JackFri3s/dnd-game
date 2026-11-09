@@ -2,7 +2,8 @@
 
 import type { Ability, AreaShape, Character } from './rules.ts';
 import type { Homebrew, HomebrewKind } from './homebrew.ts';
-export type { Character };
+import type { BuildingType, Npc, Place, PlaceContext, PlaceKind, PlaceSummary } from './places.ts';
+export type { Character, Place };
 
 export type Role = 'table' | 'player' | 'dm';
 
@@ -132,8 +133,16 @@ export interface Area {
   at: number;
 }
 
+/** A place as saved: while the party is elsewhere, its monsters, NPCs and spell areas wait in `parked`. */
+export interface StoredPlace extends Place {
+  parked?: { tokens: Record<string, Token>; areas: Area[] };
+}
+
 /** The part of a game that belongs to the campaign and is saved with it. */
 export interface World {
+  /** Every map in the campaign, and the one the party is in (board = its size). */
+  places: Record<string, StoredPlace>;
+  placeId: string;
   board: { w: number; h: number }; // map units (1 unit = 5 ft)
   tokens: Record<string, Token>;
   view: { x: number; y: number };
@@ -195,6 +204,12 @@ export interface RoomState {
   areas: Area[];
   homebrew: Homebrew;
   combat: Combat | null;
+  /** The place the party is in. Changes with `placeRev`; left out when this device already has it. */
+  placeId: string;
+  placeRev: number;
+  place?: Place;
+  /** DM only: every place in the campaign. */
+  places: PlaceSummary[];
 }
 
 /** Standard CSS pixels per mm (96 per inch): used until the Main Screen is calibrated. */
@@ -326,6 +341,31 @@ export interface Requests {
   'campaign:delete-snapshot': { args: { snapshotId: string }; result: null };
   'campaign:export': { args: Record<string, never>; result: { data: unknown; name: string } };
   'campaign:import': { args: { data: unknown }; result: { campaign: CampaignSummary } };
+
+  // ---- places (procedural maps) ----
+  /**
+   * DM: make a new place from a seed (everyone's generator gives the same result).
+   * With entranceId it is what lies behind that entrance of the current place.
+   */
+  'place:generate': {
+    args: { kind: PlaceKind; seed: number; context: PlaceContext; name?: string; building?: BuildingType; entranceId?: string; go?: boolean };
+    result: { placeId: string };
+  };
+  'place:go': { args: { placeId: string }; result: null }; // DM: the party moves there
+  /** Go through an entrance of the current place (DM), or ask the DM to (players). */
+  'place:enter': { args: { entranceId: string }; result: null };
+  'place:update': {
+    args: {
+      placeId: string;
+      name?: string;
+      description?: string;
+      npcs?: Npc[];
+      encounters?: Place['encounters'];
+      entrance?: { entranceId: string; name?: string; hidden?: boolean };
+    };
+    result: null;
+  };
+  'place:delete': { args: { placeId: string }; result: null }; // with everything inside it
 }
 export type RequestName = keyof Requests;
 

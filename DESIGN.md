@@ -101,6 +101,8 @@ World / Region map (overland travel, distances in miles)
 - **Generated content per location:** name, layout, terrain and buildings, NPCs (name, role, personality, short description), loot and encounters (from the SRD monster and item lists, scaled to party level).
 - **The DM can always:** regenerate, edit the map by hand, rename things, add or remove NPCs and monsters, or lock a map so it never changes.
 
+**Built in step 7:** places are villages, building interiors, caves and empty maps, linked by entrances (doors, cave mouths, cellar or crypt stairs, tunnels deeper, ways out). Each place is generated from a seed plus the DM's context; the generators run in the shared code, so the DM's preview and the server's result are identical. Places are stored as generated (not regenerated on load), so later changes to the generators never change an existing campaign. The party is always in one place; monsters, NPCs and spell areas stay in the place they're in while the party is elsewhere. Region maps and hand-editing of map shapes (walls, buildings) are not built yet.
+
 ### 4a. DM-guided generation (story context)
 The story is the DM's, so the DM can steer what gets generated. This is **optional**: with no input, the generator picks everything at random.
 
@@ -182,6 +184,7 @@ The SRD covers the core mechanics, combat, conditions, spells, many monsters, eq
 - **Event log:** every action is recorded. This allows undo and a session recap ("last time on...").
 - **Resume:** the DM opens the campaign and the Main Screen and all players reconnect to exactly the same situation, even mid-combat on the same turn.
 - **Reconnects:** if a phone locks or loses Wi-Fi, it rejoins automatically.
+- **Places are stored one per key** (in the game and in the campaign), so a big world doesn't make every save bigger. Save points store each version of a place once and refer to it, and backup files (version 2) do the same; version 1 backups and campaigns from before places still open (their map becomes the first place).
 
 ## 10. Technical plan (proposed)
 
@@ -232,7 +235,7 @@ Still open:
 4. **Rules data:** import the SRD (5e-database); character creation and character sheet on the phone.
 5. **Movement and range highlighting** on the hex grid.
 6. **Combat:** initiative, turns, attacks, damage, conditions.
-7. **Procedural generation:** region map → village with name and NPCs → enterable buildings and caves generated on demand.
+7. **Procedural generation:** village with name and NPCs → enterable buildings and caves generated on demand. ✔ (region map still to do)
 8. **DM tools:** map editor, fog of war, monster placement, overrides.
 9. Polish: art, sounds, recaps, homebrew content.
 

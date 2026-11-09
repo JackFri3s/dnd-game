@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Member, RoomState, TokenKind } from '../../../shared/protocol.ts';
 import type { GameStore } from '../game.ts';
 import { nextPanelSide, usePanelSide } from '../settings.ts';
@@ -12,13 +12,15 @@ import { useRules } from '../rules/index.ts';
 import { CharacterList } from '../characters/CharacterList.tsx';
 import { HomebrewPanel } from '../characters/HomebrewPanel.tsx';
 import { seatNumber } from '../seats.ts';
+import { WorldPanel, type PlacePreview } from '../components/WorldPanel.tsx';
 
 const TOKEN_SHADES = ['#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3'];
-type Panel = 'token' | 'combat' | 'add' | 'party' | 'campaign' | 'table';
+type Panel = 'token' | 'combat' | 'add' | 'world' | 'party' | 'campaign' | 'table';
 const PANELS: { id: Panel; label: string }[] = [
   { id: 'token', label: 'Selected' },
   { id: 'combat', label: 'Combat' },
   { id: 'add', label: 'Add' },
+  { id: 'world', label: 'World' },
   { id: 'party', label: 'Party' },
   { id: 'campaign', label: 'Campaign' },
   { id: 'table', label: 'Main Screen' },
@@ -49,6 +51,24 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const { current, movedFt } = combatInfo(state);
   const monsters = useMonsters();
   const selectedMonster = selected?.stats?.monster ? monsters?.find((m) => m.index === selected.stats!.monster) : undefined;
+  const [preview, setPreview] = useState<PlacePreview | null>(null);
+  const [entranceId, setEntranceId] = useState<string | null>(null);
+
+  // A new place: look at where the party arrives.
+  useEffect(() => {
+    setCamera((c) => ({ ...c, ...state.view }));
+    setEntranceId(null);
+  }, [state.placeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function showPreview(p: PlacePreview | null) {
+    setPreview(p);
+    if (p) setCamera((c) => ({ ...c, x: p.place.size.w / 2, y: p.place.size.h / 2, scale: Math.min(c.scale, 14) }));
+    else setCamera((c) => ({ ...c, ...state.view }));
+  }
+  // While previewing, the DM's map shows the preview instead of the real place.
+  const mapState: RoomState = preview
+    ? { ...state, place: preview.place, board: preview.place.size, tokens: [], areas: [], highlight: null }
+    : state;
 
   function kick(p: Member) {
     if (!confirm(`Remove ${p.name} from the game? Their token stays on the map.`)) return;
@@ -87,24 +107,43 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
       )}
       <div className="game-body">
       <div className="game-board">
+        {preview && <div className="preview-banner">Preview of {preview.place.name}: only you can see it</div>}
         <MapBoard
-          state={state}
+          state={mapState}
           camera={camera}
           onCameraChange={setCamera}
-          canDrag={() => true}
-          onMoveToken={(token, to) => run(store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }))}
+          canDrag={() => !preview}
+          onMoveToken={(token, to) =>
+              // the map needs the refusal too, to put the token back
+              store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }).then(
+                () => setError(null),
+                (e: Error) => {
+                  setError(e.message);
+                  throw e;
+                },
+              )
+            }
           selectedTokenId={selectedId}
           onSelectToken={(t) => {
             setSelectedId(t?.id ?? null);
             if (t) setPanel('token');
           }}
-          tableFrame={{ onMove: (c) => run(store.request('view:set', c)) }}
+          tableFrame={preview ? undefined : { onMove: (c) => run(store.request('view:set', c)) }}
+          onTapEntrance={
+            preview
+              ? undefined
+              : (e) => {
+                  setEntranceId(e.id);
+                  setPanel('world');
+                }
+          }
+          selectedEntranceId={entranceId}
           onTapMap={aimState.aim ? aimState.tapMap : targeting.pending ? targeting.tap : undefined}
           movedFt={movedFt}
           currentTokenId={current?.id ?? null}
           showHp
           areaPreview={aimState.preview}
-          localHighlight={highlight.local}
+          localHighlight={preview ? null : highlight.local}
         />
       </div>
       <footer className="game-controls">
@@ -215,6 +254,18 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
             <h4 className="section-label">Your own token</h4>
             <AddToken store={store} onAdded={(id) => setSelectedId(id)} />
           </>
+        )}
+
+        {panel === 'world' && (
+          <WorldPanel
+            store={store}
+            state={state}
+            preview={preview}
+            onPreview={showPreview}
+            selectedEntranceId={entranceId}
+            onSelectEntrance={setEntranceId}
+            onFocus={(at) => setCamera((c) => ({ ...c, x: at.x, y: at.y }))}
+          />
         )}
 
         {panel === 'party' && (

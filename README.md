@@ -10,7 +10,7 @@ See [DESIGN.md](DESIGN.md) for the full plan.
 
 ## Status
 
-Steps 1–6 of the build order are done: **connecting the screens**, **the map board**, **saving**, **rules and characters**, **movement and ranges** and **combat**.
+Steps 1–7 of the build order are done: **connecting the screens**, **the map board**, **saving**, **rules and characters**, **movement and ranges**, **combat** and **procedural places**.
 
 - Open `/table` on the Main Screen: it shows a game code and QR code. It needs no touch screen.
 - Players scan the QR code (or open `/join`), choose **Player** or **Dungeon Master**, enter their name and pick their seat.
@@ -36,6 +36,7 @@ Steps 1–6 of the build order are done: **connecting the screens**, **the map b
 - **Private first**: tapping movement, an attack or a spell shows its range only on your own screen; **Show the table** puts it on every screen.
 - **Automated rules in combat**: advantage/disadvantage (chosen, or from conditions such as poisoned, prone, blinded, restrained, invisible, dodging), automatic critical hits on paralyzed/unconscious targets in melee, saves that fail automatically, exhaustion (−2 per level to rolls, −5 ft speed), conditions from failed saves (e.g. Hold Person paralyzes), concentration (one spell at a time, a Constitution save when hurt, its effects end when lost), casting with higher spell slots (more damage/healing), cantrips that grow with level, healing spells, death saving throws (and failures from damage at 0 HP), no movement while grappled/restrained, standing up from prone costs half your speed, opportunity attack alerts, Dash/Disengage/Dodge, Rage (extra damage, resistance), Sneak Attack (once per turn), and monster Multiattack.
 - **Monsters**: the DM adds any of the 341 monsters from the free rules, with their stat block, hit points and attacks.
+- **Places** (step 7): in the DM's **World** tab, make a **village**, **building** or **cave** from a short description (words like river, mine, walled, market, farms, temple, haunted or abandoned change what's made), a mood, a size and the party level. The DM sees a **preview** first and can roll another until they like it; players see it only once it's used. Villages get a name, roads, a square with a well, rivers and bridges, fields, trees, named inns, shrines, smithies and shops, and people (name, role, personality, look and a secret only the DM sees). Every door, cave mouth and cellar on a map can be entered: what's inside is made the first time (rooms with furniture, or a cave with monsters suited to the party's level), and the people who work there are found inside. The party moves between places together; monsters and NPCs stay where they were. **Walls block players' movement.** Players tap a door to ask the DM to go in. The DM can rename places, hide doors (e.g. a trapdoor) from players, add, edit or remove people, put people and waiting monsters on the map, and keep notes per place.
 - **Two looks** (Settings): **Minimal** (greyscale) or **Parchment** (the fantasy paper-and-ink look), each in light or dark. In both, movement is green, attacks are red and spells are purple.
 
 ## Run it on your computer
@@ -69,7 +70,7 @@ You can also deploy from your own computer with `npm run deploy` (it asks you to
 |---|---|
 | `client/` | The web app all screens use (React). |
 | `worker/` | The game server on Cloudflare: `index.ts` is the front door, `room.ts` is one game, `campaign.ts` stores campaigns and save points (all Durable Objects). |
-| `shared/` | Definitions used by both, like the messages and the seats. |
+| `shared/` | Definitions used by both: the messages, rules, distances, and the place generators (`generate.ts`, `places.ts`, `random.ts`). |
 | `wrangler.jsonc` | Cloudflare settings. |
 
 ## Rules content

@@ -103,7 +103,13 @@ export class GameStore {
           },
         );
       },
-      onState: (state) => conn === this.conn && this.set({ state }),
+      onState: (state) => {
+        if (conn !== this.conn) return;
+        // The map of the current place is only sent when it changes: keep the one we have.
+        const prev = this.snap.state;
+        if (!state.place && prev?.place && prev.placeId === state.placeId) state = { ...state, place: prev.place };
+        this.set({ state });
+      },
       onNotice: (text) => conn === this.conn && this.set({ notice: text }),
       onStatus: (status) => conn === this.conn && this.set({ status }),
       onEnd: (reason) => {

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { Entrance } from '../../../shared/places.ts';
 import type { Member, RoomState } from '../../../shared/protocol.ts';
 import type { GameStore } from '../game.ts';
 import { nextPanelSide, usePanelSide } from '../settings.ts';
@@ -38,6 +39,16 @@ export function PlayerGame({
   const [error, setError] = useState<string | null>(null);
   const run = (p: Promise<unknown>) => p.then(() => setError(null), (e: Error) => setError(e.message));
   const dm = state.members.find((m) => m.role === 'dm');
+  const [entrance, setEntrance] = useState<Entrance | null>(null);
+  const [asked, setAsked] = useState(false);
+
+  // The party went somewhere new: look at where you arrived.
+  useEffect(() => {
+    const t = state.tokens.find((x) => x.ownerId === me.id);
+    setCamera((c) => ({ ...c, ...(t ? { x: t.x, y: t.y } : state.view) }));
+    setEntrance(null);
+    setError(null);
+  }, [state.placeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={`game-layout panel-${side}`} data-testid="player-game">
@@ -78,13 +89,27 @@ export function PlayerGame({
             camera={camera}
             onCameraChange={setCamera}
             canDrag={(t) => t.ownerId === me.id}
-            onMoveToken={(token, to) => run(store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }))}
+            onMoveToken={(token, to) =>
+              // the map needs the refusal too, to put the token back
+              store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }).then(
+                () => setError(null),
+                (e: Error) => {
+                  setError(e.message);
+                  throw e;
+                },
+              )
+            }
             selectedTokenId={myToken?.id}
             onTapMap={aimState.aim ? aimState.tapMap : targeting.pending ? targeting.tap : undefined}
             areaPreview={aimState.preview}
             movedFt={movedFt}
             currentTokenId={current?.id ?? null}
             localHighlight={highlight.local}
+            onTapEntrance={(e) => {
+              setEntrance(e);
+              setAsked(false);
+            }}
+            selectedEntranceId={entrance?.id}
           />
         </div>
         <footer className="game-controls">
@@ -96,6 +121,26 @@ export function PlayerGame({
           <CombatBar store={store} state={state} token={myToken} />
           {!myToken ? (
             <p className="hint">Your token will appear when the Dungeon Master starts the game.</p>
+          ) : entrance ? (
+            <div className="stack-sm" data-testid="entrance-bar">
+              <div className="entrance-bar">
+                <div className="grow">
+                  <strong>{entrance.name}</strong>
+                  <div className="hint">{asked ? 'The Dungeon Master has been asked.' : 'The Dungeon Master decides when the party goes through.'}</div>
+                </div>
+                <button className="icon-btn" onClick={() => setEntrance(null)} aria-label="Close">
+                  ✕
+                </button>
+              </div>
+              <button
+                className="button primary block"
+                disabled={asked}
+                onClick={() => run(store.request('place:enter', { entranceId: entrance.id }).then(() => setAsked(true)))}
+                data-testid="ask-enter"
+              >
+                {entrance.kind === 'exit' ? 'Ask to leave' : 'Ask to go in'}
+              </button>
+            </div>
           ) : targeting.pending ? (
             <TargetBar targeting={targeting} />
           ) : aimState.aim ? (
