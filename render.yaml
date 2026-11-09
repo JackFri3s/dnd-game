@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: dnd
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health

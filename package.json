@@ -1,0 +1,36 @@
+{
+  "name": "dnd",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Digital tabletop RPG: shared Main Screen, player phones and a DM device.",
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c blue,green \"tsx watch server/index.ts\" \"vite\"",
+    "build": "vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "concurrently": "^10.0.7",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6"
+  }
+}
