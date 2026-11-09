@@ -32,6 +32,8 @@ export interface ClassLevel {
   cantrips?: number;
   prepared?: number;
   slots?: number[]; // spell slots for spell levels 1..9
+  /** Class numbers at this level: rage_count, sneak_attack ("3d6"), martial_arts_die, focus_points, ... */
+  numbers?: Record<string, number | string>;
 }
 
 export interface RulesClass {
@@ -52,9 +54,10 @@ export interface RulesSpecies {
   index: string;
   name: string;
   size: string;
+  sizeOptions?: string[]; // when the player chooses (e.g. Small or Medium)
   speed: number;
   traits: string[];
-  subspecies: { index: string; name: string; traits: string[] }[];
+  subspecies: { index: string; name: string; traits: string[]; traitLevels?: Record<string, number> }[];
 }
 
 export interface RulesBackground {
@@ -72,7 +75,7 @@ export interface RulesItem {
   name: string;
   kind: 'weapon' | 'armor' | 'shield' | 'gear' | 'tool' | 'pack' | 'other';
   armor?: { base: number; dex: boolean; maxDex?: number; category: 'light' | 'medium' | 'heavy' };
-  weapon?: { damage: string; type: string; properties: string[]; range?: { normal: number; long?: number }; ranged: boolean };
+  weapon?: { category?: 'simple' | 'martial'; damage: string; type: string; properties: string[]; range?: { normal: number; long?: number }; ranged: boolean };
   contents?: ItemRef[];
   cost?: string;
   weight?: number;
@@ -112,9 +115,9 @@ export interface RulesData {
   classes: RulesClass[];
   species: RulesSpecies[];
   backgrounds: RulesBackground[];
-  feats: RulesText[];
+  feats: (RulesText & { type?: string; minLevel?: number })[];
   traits: RulesText[];
-  features: (RulesText & { class: string; level: number })[];
+  features: (RulesText & { class: string; level: number; subclass?: string })[];
   spells: RulesSpell[];
   items: RulesItem[];
   languages: string[];
@@ -159,6 +162,12 @@ export interface Character {
   deathSaves: { successes: number; failures: number };
   /** Limited-use features, e.g. "Second Wind 1/1" or "Rage 2/2". */
   trackers: { name: string; max: number; used: number }[];
+  /** Uses spent of the limited-use features the rules give automatically (keyed, see derive()). */
+  autoUsed: Record<string, number>;
+  /** Choices the rules ask for, made in the builder, the editor or when levelling up. */
+  choices: CharacterChoices;
+  /** Your own features, traits or notes (homebrew). */
+  customFeatures: { name: string; description: string }[];
   spellSlotsUsed: number[]; // per spell level 1..9
   /** Numbers the player set by hand instead of the calculated ones. */
   overrides: { ac?: number; speed?: number };
@@ -169,6 +178,25 @@ export interface Character {
   updatedAt: number;
 }
 
+export interface CharacterChoices {
+  fightingStyle?: string; // feat index, e.g. "archery"
+  expertise?: string[]; // skill indexes with double proficiency
+  speciesSkill?: string; // Elf Keen Senses or Human Skillful
+  originFeat?: string; // Human Versatile
+  skilled?: string[]; // skills from the Skilled feat
+  magicInitiate?: { list: string; ability: Ability; cantrips: string[]; spell: string }[];
+  lineageAbility?: Ability; // spellcasting ability for species spells
+  size?: string; // species that let you choose Small or Medium
+  levelUps?: { level: number; hp: number; asi?: Partial<Record<Ability, number>>; feat?: string }[];
+}
+
+export interface Tracker {
+  key: string;
+  name: string;
+  max: number;
+  recharge: 'short' | 'long';
+}
+
 export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
 export const POINT_BUY_BUDGET = 27;
 export const POINT_BUY_COST: Record<number, number> = { 8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9 };
@@ -177,76 +205,206 @@ export const mod = (score: number) => Math.floor((score - 10) / 2);
 export const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 export const profBonus = (level: number) => 2 + Math.floor((Math.max(1, level) - 1) / 4);
 
+/** Feats a character has from every source. */
+export function allFeats(c: Character): string[] {
+  const ch = c.choices ?? {};
+  return [...c.feats, ch.originFeat, ch.fightingStyle, ...(ch.levelUps ?? []).map((l) => l.feat)].filter((f): f is string => !!f);
+}
+
+/** Levels at which a class gets something to choose. */
+export function classChoiceLevels(cls: RulesClass | undefined) {
+  const at = (needle: string) => (cls?.levels ?? []).filter((l) => l.features.some((f) => f.endsWith(needle))).map((l) => l.level);
+  return {
+    asi: at('ability-score-improvement'),
+    epicBoon: at('epic-boon'),
+    expertise: at('expertise'),
+    fightingStyle: at('fighting-style'),
+    subclass: at('-subclass'),
+    scholar: at('scholar'),
+  };
+}
+
+const DAMAGE_TYPE: Record<string, string> = { acid: 'Acid', cold: 'Cold', fire: 'Fire', lightning: 'Lightning', poison: 'Poison', necrotic: 'Necrotic' };
+
 /** Everything on a character sheet that follows from the rules. */
 export function derive(c: Character, rules: RulesData) {
+  const ch = c.choices ?? {};
   const cls = rules.classes.find((x) => x.index === c.classIndex);
   const species = rules.species.find((x) => x.index === c.speciesIndex);
+  const sub = species?.subspecies.find((x) => x.index === c.subspeciesIndex);
+  const row = cls?.levels.find((l) => l.level === c.level);
+  const num = (k: string) => row?.numbers?.[k];
   const prof = profBonus(c.level);
   const mods = Object.fromEntries(Object.entries(c.abilities).map(([k, v]) => [k, mod(v)])) as Record<Ability, number>;
+  const feats = allFeats(c);
+  const hasFeature = (needle: string) => (cls?.levels ?? []).some((l) => l.level <= c.level && l.features.some((f) => f.includes(needle)));
 
+  // ---- species traits that count at this level ----
+  const traitIds = [
+    ...(species?.traits ?? []),
+    ...(sub?.traits ?? []).filter((t) => (sub?.traitLevels?.[t] ?? 1) <= c.level),
+  ];
+  const darkvision = Math.max(0, ...traitIds.map((t) => Number(t.match(/^darkvision-(\d+)/)?.[1] ?? 0)));
+  const resistances = [
+    ...traitIds.map((t) => t.match(/(?:damage-resistance|lineage-resistance)-(\w+)/)?.[1]).filter((x): x is string => !!x).map((x) => DAMAGE_TYPE[x] ?? x),
+    ...(traitIds.includes('dwarven-resilience') ? ['Poison'] : []),
+  ];
+
+  // ---- skills (proficiency and expertise) ----
+  const proficient = new Set([...c.skills, ch.speciesSkill, ...(ch.skilled ?? [])].filter((x): x is string => !!x));
+  const expert = new Set(ch.expertise ?? []);
   const saves = Object.fromEntries(
     Object.keys(c.abilities).map((a) => [a, mods[a as Ability] + (cls?.saves.includes(a as Ability) ? prof : 0)]),
   ) as Record<Ability, number>;
   const skills = rules.skills.map((s) => ({
     ...s,
-    proficient: c.skills.includes(s.index),
-    bonus: mods[s.ability] + (c.skills.includes(s.index) ? prof : 0),
+    proficient: proficient.has(s.index),
+    expert: expert.has(s.index) && proficient.has(s.index),
+    bonus: mods[s.ability] + (proficient.has(s.index) ? (expert.has(s.index) ? 2 * prof : prof) : 0),
   }));
 
-  // Armour Class: worn armour (+ Dex, capped for medium), shield, or Unarmored Defense.
+  // ---- armour class ----
   const equipped = c.items.filter((i) => i.equipped && i.index).map((i) => rules.items.find((r) => r.index === i.index)!).filter(Boolean);
   const armor = equipped.find((i) => i.kind === 'armor' && i.armor);
   const shield = equipped.some((i) => i.kind === 'shield');
   let ac: number;
-  if (armor?.armor) {
-    const dex = armor.armor.dex ? Math.min(mods.dex, armor.armor.maxDex ?? Infinity) : 0;
-    ac = armor.armor.base + dex;
-  } else if (c.classIndex === 'barbarian') ac = 10 + mods.dex + mods.con;
+  if (armor?.armor) ac = armor.armor.base + (armor.armor.dex ? Math.min(mods.dex, armor.armor.maxDex ?? Infinity) : 0);
+  else if (c.classIndex === 'barbarian') ac = 10 + mods.dex + mods.con;
   else if (c.classIndex === 'monk' && !shield) ac = 10 + mods.dex + mods.wis;
   else ac = 10 + mods.dex;
   if (shield) ac += 2;
-  ac = c.overrides.ac ?? ac;
+  if (armor && feats.includes('defense')) ac += 1;
+  ac = c.overrides?.ac ?? ac;
 
-  const speedFt = c.overrides.speed ?? species?.speed ?? 30;
-  const initiative = mods.dex + (c.feats.includes('alert') ? prof : 0);
-  const perception = skills.find((s) => s.index === 'perception');
-  const passivePerception = 10 + (perception?.bonus ?? mods.wis);
+  // ---- speed ----
+  let speedFt = species?.speed ?? 30;
+  if (traitIds.includes('wood-elf-speed-increase')) speedFt = 35;
+  const unarmoredMove = Number(num('unarmored_movement_bonus') ?? 0);
+  if (c.classIndex === 'monk' && !armor && !shield) speedFt += unarmoredMove;
+  if (c.classIndex === 'barbarian' && hasFeature('fast-movement') && armor?.armor?.category !== 'heavy') speedFt += 10;
+  speedFt = c.overrides?.speed ?? speedFt;
 
-  const levelRow = cls?.levels.find((l) => l.level === c.level);
+  const initiative = mods.dex + (feats.includes('alert') ? prof : 0);
+  const passivePerception = 10 + (skills.find((s) => s.index === 'perception')?.bonus ?? mods.wis);
+
+  // ---- spellcasting ----
   const spellAbility = cls?.spellcasting ?? null;
   const spellcasting = spellAbility
     ? {
         ability: spellAbility,
         saveDc: 8 + prof + mods[spellAbility],
         attack: prof + mods[spellAbility],
-        slots: levelRow?.slots ?? [],
-        cantrips: levelRow?.cantrips ?? 0,
-        prepared: levelRow?.prepared ?? 0,
+        slots: row?.slots ?? [],
+        cantrips: row?.cantrips ?? 0,
+        prepared: row?.prepared ?? 0,
       }
     : null;
+  // Spells from species and feats: always prepared, cast with their own ability.
+  const bonusSpells: { index: string; source: string; ability: Ability }[] = [];
+  for (const t of traitIds) {
+    const m = t.match(/^lineage-spell-(.+)$/);
+    if (m && rules.spells.some((s) => s.index === m[1])) bonusSpells.push({ index: m[1], source: sub?.name.replace(/^.*?: /, '') ?? species?.name ?? 'Species', ability: ch.lineageAbility ?? 'int' });
+  }
+  for (const mi of ch.magicInitiate ?? []) {
+    for (const s of [...mi.cantrips, mi.spell]) if (s) bonusSpells.push({ index: s, source: 'Magic Initiate', ability: mi.ability });
+  }
 
-  const attacks = c.items
-    .map((i) => ({ item: i, rules: i.index ? rules.items.find((r) => r.index === i.index) : undefined }))
-    .filter((x) => x.rules?.weapon)
-    .map(({ item, rules: r }) => {
-      const w = r!.weapon!;
-      const finesse = w.properties.includes('Finesse');
-      const ability: Ability = w.ranged ? 'dex' : finesse && mods.dex > mods.str ? 'dex' : 'str';
-      return {
-        name: item.name,
-        toHit: mods[ability] + prof, // all classes in the SRD are proficient with Simple weapons; good enough for a sheet
-        damage: `${w.damage}${mods[ability] ? signed(mods[ability]) : ''} ${w.type.toLowerCase()}`,
-        range: [
-          w.properties.includes('Reach') ? 'reach 10 ft' : w.ranged ? '' : 'reach 5 ft',
-          w.range?.long ? `${w.ranged ? '' : 'thrown '}${w.range.normal}/${w.range.long} ft` : '',
-        ]
-          .filter(Boolean)
-          .join(', '),
-      };
+  // ---- attacks ----
+  const profNames = (cls?.proficiencies ?? []).map((p) => p.toLowerCase());
+  const weaponProficient = (r: RulesItem) =>
+    (r.weapon?.category === 'simple' && profNames.includes('simple weapons')) ||
+    (r.weapon?.category === 'martial' && profNames.includes('martial weapons')) ||
+    profNames.some((p) => p.replace(/s$/, '') === r.name.toLowerCase()) ||
+    (c.classIndex === 'monk' && r.weapon?.category === 'martial' && r.weapon.properties.includes('Light')) ||
+    (c.classIndex === 'rogue' && r.weapon?.category === 'martial' && (r.weapon.properties.includes('Finesse') || r.weapon.properties.includes('Light')));
+  const martialDie = num('martial_arts_die') ? Number(num('martial_arts_die')) : 0;
+  const isMonkWeapon = (r: RulesItem) => c.classIndex === 'monk' && (r.weapon?.category === 'simple' || r.weapon?.properties.includes('Light'));
+  const attacks: { name: string; toHit: number; damage: string; range: string; proficient: boolean; save?: string }[] = [];
+  for (const item of c.items) {
+    const r = item.index ? rules.items.find((x) => x.index === item.index) : undefined;
+    if (!r?.weapon) continue;
+    const w = r.weapon;
+    const finesse = w.properties.includes('Finesse') || isMonkWeapon(r);
+    const ability: Ability = w.ranged ? 'dex' : finesse && mods.dex > mods.str ? 'dex' : 'str';
+    const isProf = weaponProficient(r);
+    const archery = w.ranged && feats.includes('archery') ? 2 : 0;
+    let dice = w.damage;
+    if (isMonkWeapon(r) && martialDie > Number(dice.split('d')[1] ?? 0)) dice = `1d${martialDie}`;
+    attacks.push({
+      name: item.name,
+      toHit: mods[ability] + (isProf ? prof : 0) + archery,
+      damage: `${dice}${mods[ability] ? signed(mods[ability]) : ''} ${w.type.toLowerCase()}`,
+      range: [
+        w.properties.includes('Reach') ? 'reach 10 ft' : w.ranged ? '' : 'reach 5 ft',
+        w.range?.long ? `${w.ranged ? '' : 'thrown '}${w.range.normal}/${w.range.long} ft` : '',
+        isProf ? '' : 'not proficient',
+      ]
+        .filter(Boolean)
+        .join(', '),
+      proficient: isProf,
     });
+  }
+  // Everyone can punch; a monk's Martial Arts makes it better.
+  const unarmedAbility: Ability = martialDie && mods.dex > mods.str ? 'dex' : 'str';
+  attacks.push({
+    name: 'Unarmed strike',
+    toHit: mods[unarmedAbility] + prof,
+    damage: martialDie ? `1d${martialDie}${signed(mods[unarmedAbility])} bludgeoning` : `${Math.max(1, 1 + mods.str)} bludgeoning`,
+    range: 'reach 5 ft',
+    proficient: true,
+  });
+  // Dragonborn Breath Weapon.
+  const breath = traitIds.find((t) => t.startsWith('draconic-breath-weapon-'));
+  if (breath) {
+    const type = DAMAGE_TYPE[breath.split('-').pop()!] ?? '';
+    const dice = c.level >= 17 ? 4 : c.level >= 11 ? 3 : c.level >= 5 ? 2 : 1;
+    attacks.push({ name: 'Breath Weapon', toHit: 0, damage: `${dice}d10 ${type.toLowerCase()}`, range: '15 ft cone or 30 ft line', proficient: true, save: `DC ${8 + mods.con + prof} DEX` });
+  }
 
+  // ---- limited-use features the rules give ----
+  const trackers: Tracker[] = [];
+  const add = (key: string, name: string, max: number | undefined, recharge: Tracker['recharge']) => {
+    if (max && max > 0) trackers.push({ key, name, max, recharge });
+  };
+  add('rage', 'Rage', Number(num('rage_count') ?? 0), 'long');
+  add('second-wind', 'Second Wind', Number(num('second_wind_uses') ?? 0), 'long');
+  if (c.classIndex === 'fighter' && c.level >= 2) add('action-surge', 'Action Surge', c.level >= 17 ? 2 : 1, 'short');
+  add('channel-divinity', 'Channel Divinity', Number(num('channel_divinity_charges') ?? 0), 'long');
+  add('wild-shape', 'Wild Shape', Number(num('wild_shape_uses') ?? 0), 'long');
+  add('focus', 'Focus Points', Number(num('focus_points') ?? 0), 'short');
+  add('sorcery', 'Sorcery Points', Number(num('sorcery_points') ?? 0), 'long');
+  if (c.classIndex === 'bard') add('bardic-inspiration', 'Bardic Inspiration', Math.max(1, mods.cha), c.level >= 5 ? 'short' : 'long');
+  if (c.classIndex === 'paladin') add('lay-on-hands', 'Lay On Hands (HP)', 5 * c.level, 'long');
+  if (c.classIndex === 'wizard') add('arcane-recovery', 'Arcane Recovery', 1, 'long');
+  if (breath) add('breath-weapon', 'Breath Weapon', prof, 'long');
+  if (traitIds.includes('adrenaline-rush')) add('adrenaline-rush', 'Adrenaline Rush', prof, 'short');
+  if (traitIds.includes('relentless-endurance')) add('relentless-endurance', 'Relentless Endurance', 1, 'long');
+  if (traitIds.some((t) => t.startsWith('giant-ancestry-'))) add('giant-ancestry', 'Giant Ancestry', prof, 'long');
+  if (traitIds.includes('large-form') && c.level >= 5) add('large-form', 'Large Form', 1, 'long');
+  if ((ch.magicInitiate ?? []).length) add('magic-initiate', 'Magic Initiate free cast', (ch.magicInitiate ?? []).length, 'long');
+
+  // ---- class numbers worth showing ----
+  const classNumbers: { label: string; value: string }[] = [];
+  if (num('sneak_attack')) classNumbers.push({ label: 'Sneak Attack', value: String(num('sneak_attack')) });
+  if (num('rage_damage_bonus')) classNumbers.push({ label: 'Rage damage', value: `+${num('rage_damage_bonus')}` });
+  if (martialDie) classNumbers.push({ label: 'Martial Arts', value: `d${martialDie}` });
+  if (unarmoredMove) classNumbers.push({ label: 'Unarmored movement', value: `+${unarmoredMove} ft` });
+  if (num('bardic_inspiration_die')) classNumbers.push({ label: 'Bardic Inspiration', value: `d${num('bardic_inspiration_die')}` });
+  if (num('weapon_mastery')) classNumbers.push({ label: 'Weapon masteries', value: String(num('weapon_mastery')) });
+  if (num('eldritch_invocations')) classNumbers.push({ label: 'Invocations', value: String(num('eldritch_invocations')) });
+  if (num('favored_enemies')) classNumbers.push({ label: 'Favored Enemy', value: String(num('favored_enemies')) });
+
+  const size = ch.size ?? species?.size ?? 'Medium';
   const classLine = [cls?.name ?? c.classIndex, c.level, '·', species?.name ?? c.speciesIndex].join(' ');
-  return { cls, species, prof, mods, saves, skills, ac, speedFt, initiative, passivePerception, spellcasting, attacks, classLine };
+  return {
+    cls, species, sub, prof, mods, saves, skills, ac, speedFt, initiative, passivePerception, spellcasting, bonusSpells, attacks,
+    classLine, trackers, classNumbers, darkvision, resistances, size, feats, traitIds, armor, shield,
+  };
+}
+
+/** Extra hit points from species and feats (Dwarven Toughness: +1 per level). */
+export function bonusHp(c: Pick<Character, 'speciesIndex' | 'level'>) {
+  return c.speciesIndex === 'dwarf' ? c.level : 0;
 }
 
 /** Average hit points for a level (level 1: full hit die; later levels: average roll). */
@@ -287,6 +445,9 @@ export function emptyCharacter(id = ''): Character {
     hitDiceSpent: 0,
     deathSaves: { successes: 0, failures: 0 },
     trackers: [],
+    autoUsed: {},
+    choices: {},
+    customFeatures: [],
     spellSlotsUsed: [0, 0, 0, 0, 0, 0, 0, 0, 0],
     overrides: {},
     details: { appearance: '', personality: '', ideals: '', bonds: '', flaws: '', backstory: '' },

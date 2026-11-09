@@ -3,6 +3,7 @@ import {
   emptyCharacter,
   mod,
   withSummary,
+  bonusHp,
   type Ability,
   type Character,
   type CharacterItem,
@@ -10,6 +11,7 @@ import {
   type RulesData,
 } from '../../../shared/rules.ts';
 import { STANDARD_LANGUAGES, randomName } from '../rules/index.ts';
+import { autoChoices } from './choices.ts';
 
 /** Starting gear as inventory: packs are listed with their contents; the first armour and shield are worn. */
 export function expandEquipment(rules: RulesData, options: (EquipmentOption | undefined)[]): { items: CharacterItem[]; gold: number } {
@@ -76,10 +78,9 @@ export function quickCharacter(
   const classSpells = rules.spells.filter((s) => s.classes.includes(cls.index));
   const skills = sample(cls.skillChoice.from.filter((s) => !background.skills.includes(s)), cls.skillChoice.choose);
   const { items, gold } = expandEquipment(rules, [cls.equipment[0], background.equipment[0]]);
-  const hp = Math.max(1, cls.hitDie + mod(abilities.con));
+  const hp = Math.max(1, cls.hitDie + mod(abilities.con) + bonusHp({ speciesIndex: species.index, level: 1 }));
 
-  return withSummary(
-    {
+  const draft: Character = {
       ...emptyCharacter(),
       name: choice.name?.trim() || randomName(),
       classIndex: cls.index,
@@ -97,7 +98,6 @@ export function quickCharacter(
       spells: sample(classSpells.filter((s) => s.level === 1).map((s) => s.index), level1.prepared ?? 0),
       hp: { max: hp, current: hp, temp: 0 },
       createdWith: 'builder',
-    },
-    rules,
-  );
+  };
+  return withSummary({ ...draft, choices: autoChoices(draft, rules) }, rules);
 }

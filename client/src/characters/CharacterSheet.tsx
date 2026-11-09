@@ -18,6 +18,7 @@ interface Props {
   editable: boolean;
   onSave: (c: Character) => Promise<unknown>;
   onEdit: () => void;
+  onLevelUp?: () => void;
   /** Roll dice through the game (shown on the Main Screen). */
   onRoll?: (label: string, modifier: number, dice?: { count: number; sides: number }[]) => void;
 }
@@ -25,7 +26,16 @@ interface Props {
 /** Characters saved by older versions miss some fields: fill them in. */
 export function normalizeCharacter(c: Character): Character {
   const base = emptyCharacter();
-  return { ...base, ...c, deathSaves: { ...base.deathSaves, ...c.deathSaves }, trackers: c.trackers ?? [], overrides: c.overrides ?? {} };
+  return {
+    ...base,
+    ...c,
+    deathSaves: { ...base.deathSaves, ...c.deathSaves },
+    trackers: c.trackers ?? [],
+    overrides: c.overrides ?? {},
+    autoUsed: c.autoUsed ?? {},
+    choices: c.choices ?? {},
+    customFeatures: c.customFeatures ?? [],
+  };
 }
 
 /** "2d6+3 Slashing" -> dice and modifier to roll. */
@@ -40,7 +50,7 @@ function parseDamage(text: string) {
  * top, then defences, then abilities with their saves and skills, attacks,
  * spells and features. Everything is worked out from the rules.
  */
-export function CharacterSheet({ character, rules, editable, onSave, onEdit, onRoll }: Props) {
+export function CharacterSheet({ character, rules, editable, onSave, onEdit, onLevelUp, onRoll }: Props) {
   const c = normalizeCharacter(character);
   const { unit } = useSettings();
   const d = derive(c, rules);
@@ -72,16 +82,40 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
     setAmount('');
   }
 
+  // ---- rests ----
+  function rest(kind: 'short' | 'long') {
+    const autoUsed = { ...c.autoUsed };
+    for (const t of d.trackers) if (kind === 'long' || t.recharge === 'short') autoUsed[t.key] = 0;
+    const trackers = kind === 'long' ? c.trackers.map((t) => ({ ...t, used: 0 })) : c.trackers;
+    if (kind === 'short') {
+      // Warlocks get their Pact Magic slots back on a short rest.
+      const spellSlotsUsed = c.classIndex === 'warlock' ? c.spellSlotsUsed.map(() => 0) : c.spellSlotsUsed;
+      save({ ...c, autoUsed, trackers, spellSlotsUsed });
+      return;
+    }
+    // Long rest: all hit points, hit dice, spell slots and uses come back.
+    save({
+      ...c,
+      autoUsed,
+      trackers,
+      spellSlotsUsed: c.spellSlotsUsed.map(() => 0),
+      hitDiceSpent: 0,
+      hp: { ...c.hp, current: c.hp.max, temp: 0 },
+      deathSaves: { successes: 0, failures: 0 },
+    });
+  }
+
   // ---- table of weapons and damaging spells ----
-  const spellRows = [...c.cantrips, ...c.spells]
+  const spellRows = [...c.cantrips, ...c.spells, ...d.bonusSpells.map((b) => b.index)]
     .map((id) => rules.spells.find((s) => s.index === id))
     .filter((s): s is NonNullable<typeof s> => !!s && !!(s.damage || s.attack));
   const armor = d.cls?.proficiencies ?? [];
   const has = (name: string) => armor.some((p) => p.toLowerCase().includes(name));
-  const traitIndexes = [...(d.species?.traits ?? []), ...(subspecies?.traits ?? [])];
-  const traits = traitIndexes.map((t) => rules.traits.find((x) => x.index === t)).filter((t): t is NonNullable<typeof t> => !!t);
-  const features = rules.features.filter((f) => f.class === c.classIndex && f.level <= c.level && !/subclass$/.test(f.index));
-  const feats = c.feats.map((f) => rules.feats.find((x) => x.index === f)).filter((f): f is NonNullable<typeof f> => !!f);
+  const traits = d.traitIds.map((t) => rules.traits.find((x) => x.index === t)).filter((t): t is NonNullable<typeof t> => !!t);
+  const features = rules.features.filter(
+    (f) => f.class === c.classIndex && f.level <= c.level && !/subclass$/.test(f.index) && (!f.subclass || f.subclass === c.subclassIndex),
+  );
+  const feats = d.feats.map((f) => rules.feats.find((x) => x.index === f)).filter((f): f is NonNullable<typeof f> => !!f);
   const firstSentence = (text: string) => text.split(/(?<=\.)\s/)[0];
 
   return (
@@ -102,9 +136,16 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
             <div className="small-box">{c.xp}</div>
           </div>
           {editable && (
-            <button className="icon-button" onClick={onEdit} aria-label="Edit character" title="Edit">
-              ✎
-            </button>
+            <div className="head-buttons">
+              <button className="icon-button" onClick={onEdit} aria-label="Edit character" title="Edit">
+                ✎
+              </button>
+              {onLevelUp && c.level < 20 && (
+                <button className="button small" onClick={onLevelUp} data-testid="level-up-button">
+                  Level up
+                </button>
+              )}
+            </div>
           )}
         </div>
         <div className="field-grid">
@@ -201,9 +242,18 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
         </button>
         <Stat label="Initiative" value={signed(d.initiative)} onClick={onRoll && (() => roll('Initiative', d.initiative))} />
         <Stat label="Speed" value={formatDistance(d.speedFt, unit)} />
-        <Stat label="Size" value={d.species?.size.split(' ')[0] ?? '–'} />
+        <Stat label="Size" value={d.size.split(' ')[0]} />
         <Stat label="Passive perception" value={d.passivePerception} />
       </section>
+      {(d.darkvision > 0 || d.resistances.length > 0 || d.classNumbers.length > 0) && (
+        <section className="box senses">
+          {d.darkvision > 0 && <Field label="Darkvision" value={formatDistance(d.darkvision, unit)} />}
+          {d.resistances.length > 0 && <Field label="Resistances" value={d.resistances.join(', ')} />}
+          {d.classNumbers.map((n) => (
+            <Field key={n.label} label={n.label} value={n.value} />
+          ))}
+        </section>
+      )}
       {onRoll && <p className="hint center">Tap a number to roll it. Rolls show on the Main Screen.</p>}
 
       <div className="sheet-columns">
@@ -230,7 +280,7 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
                 </button>
                 {skills.map((s) => (
                   <button key={s.index} className="skill-row" onClick={() => roll(s.name, s.bonus)} disabled={!onRoll}>
-                    <span className={`prof-dot ${s.proficient ? "on" : ""}`} />
+                    <span className={`prof-dot ${s.proficient ? 'on' : ''} ${s.expert ? 'expert' : ''}`} title={s.expert ? 'Expertise' : undefined} />
                     <strong>{signed(s.bonus)}</strong> {s.name}
                   </button>
                 ))}
@@ -257,7 +307,11 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
                   <tr key={`w${i}`}>
                     <td>{w.name}</td>
                     <td>
-                      <button className="roll-chip" onClick={() => roll(`${w.name} attack`, w.toHit)} disabled={!onRoll}>{signed(w.toHit)}</button>
+                      {w.save ? (
+                        <span>{w.save}</span>
+                      ) : (
+                        <button className="roll-chip" onClick={() => roll(`${w.name} attack`, w.toHit)} disabled={!onRoll}>{signed(w.toHit)}</button>
+                      )}
                     </td>
                     <td>
                       <button
@@ -319,6 +373,30 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
           {/* ---------- limited-use features ---------- */}
           <section className="box">
             <div className="field-label center">Limited-use features</div>
+            {d.trackers.map((t) => {
+              const used = Math.min(t.max, c.autoUsed[t.key] ?? 0);
+              const setUsed = (n: number) => save({ ...c, autoUsed: { ...c.autoUsed, [t.key]: Math.max(0, Math.min(t.max, n)) } });
+              return (
+                <div key={t.key} className="tracker" data-testid={`tracker-${t.key}`}>
+                  <span className="grow">
+                    {t.name} <span className="hint">· {t.recharge} rest</span>
+                  </span>
+                  {t.max <= 10 ? (
+                    <span className="diamonds">
+                      {Array.from({ length: t.max }, (_, j) => (
+                        <button key={j} className={`diamond ${j < used ? 'on' : ''}`} disabled={!editable} onClick={() => setUsed(j < used ? j : j + 1)} aria-label={`${t.name} use ${j + 1}`} />
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="stepper">
+                      <button className="button small" disabled={!editable || used >= t.max} onClick={() => setUsed(used + 1)} aria-label={`Use ${t.name}`}>−</button>
+                      <span className="pool">{t.max - used}/{t.max}</span>
+                      <button className="button small" disabled={!editable || used <= 0} onClick={() => setUsed(used - 1)} aria-label={`Restore ${t.name}`}>+</button>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
             {c.trackers.map((t, i) => (
               <div key={i} className="tracker">
                 <span className="grow">{t.name}</span>
@@ -355,18 +433,32 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
                 <button className="button small">Add</button>
               </form>
             )}
+            {editable && (
+              <div className="row-buttons rests">
+                <button className="button small" onClick={() => rest('short')} data-testid="short-rest">Short rest</button>
+                <button className="button small" onClick={() => rest('long')} data-testid="long-rest">Long rest</button>
+              </div>
+            )}
           </section>
 
           {/* ---------- spellcasting ---------- */}
-          {d.spellcasting && (
+          {(d.spellcasting || d.bonusSpells.length > 0) && (
             <section className="box">
               <div className="field-label center">Spellcasting</div>
-              <div className="spell-stats">
-                <Stat label="Ability" value={d.spellcasting.ability.toUpperCase()} />
-                <Stat label="Save DC" value={d.spellcasting.saveDc} />
-                <Stat label="Attack bonus" value={signed(d.spellcasting.attack)} />
-              </div>
-              {d.spellcasting.slots.some((n) => n > 0) && (
+              {d.spellcasting && (
+                <div className="spell-stats">
+                  <Stat label="Ability" value={d.spellcasting.ability.toUpperCase()} />
+                  <Stat label="Save DC" value={d.spellcasting.saveDc} />
+                  <Stat label="Attack bonus" value={signed(d.spellcasting.attack)} />
+                </div>
+              )}
+              {!d.spellcasting && d.bonusSpells.length > 0 && (
+                <p className="hint">
+                  Species and feat spells use {d.bonusSpells[0].ability.toUpperCase()}: save DC {8 + d.prof + d.mods[d.bonusSpells[0].ability]}, attack{' '}
+                  {signed(d.prof + d.mods[d.bonusSpells[0].ability])}.
+                </p>
+              )}
+              {d.spellcasting && d.spellcasting.slots.some((n) => n > 0) && (
                 <div className="slots">
                   {d.spellcasting.slots.map((count, lvl) =>
                     count > 0 ? (
@@ -390,16 +482,20 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
                       </div>
                     ) : null,
                   )}
-                  {editable && c.spellSlotsUsed.some((n) => n > 0) && (
-                    <button className="text-button" onClick={() => save({ ...c, spellSlotsUsed: c.spellSlotsUsed.map(() => 0) })}>Long rest: regain all slots</button>
-                  )}
+
                 </div>
               )}
-              {[...c.cantrips, ...c.spells]
+              {[...c.cantrips, ...c.spells, ...d.bonusSpells.map((b) => b.index)]
                 .map((id) => rules.spells.find((x) => x.index === id))
                 .filter((s): s is NonNullable<typeof s> => !!s)
                 .map((s) => (
-                  <Expandable key={s.index} title={s.name} meta={s.level === 0 ? 'Cantrip' : `Level ${s.level}`} open={open === s.index} onToggle={() => toggle(s.index)}>
+                  <Expandable
+                    key={s.index}
+                    title={s.name}
+                    meta={`${s.level === 0 ? 'Cantrip' : `Level ${s.level}`}${d.bonusSpells.find((b) => b.index === s.index) ? ` · ${d.bonusSpells.find((b) => b.index === s.index)!.source}` : ''}`}
+                    open={open === s.index}
+                    onToggle={() => toggle(s.index)}
+                  >
                     <p className="hint">
                       {s.castingTime} · {s.range} · {s.duration}
                       {s.concentration ? ' · concentration' : ''}
@@ -414,11 +510,21 @@ export function CharacterSheet({ character, rules, editable, onSave, onEdit, onR
           <section className="box">
             <div className="field-label center">Class features</div>
             {features.map((f) => (
-              <Expandable key={f.index} title={f.name} meta={`${d.cls?.name} ${f.level}`} open={open === f.index} onToggle={() => toggle(f.index)} preview={firstSentence(f.description)}>
+              <Expandable key={f.index} title={f.name} meta={`${f.subclass ? (subclass?.name ?? "") : (d.cls?.name ?? "")} ${f.level}`} open={open === f.index} onToggle={() => toggle(f.index)} preview={firstSentence(f.description)}>
                 <p className="prose">{f.description}</p>
               </Expandable>
             ))}
           </section>
+          {c.customFeatures.length > 0 && (
+            <section className="box">
+              <div className="field-label center">Own features &amp; notes</div>
+              {c.customFeatures.map((f, i) => (
+                <Expandable key={i} title={f.name} meta="" open={open === `custom${i}`} onToggle={() => toggle(`custom${i}`)} preview={firstSentence(f.description)}>
+                  <p className="prose">{f.description}</p>
+                </Expandable>
+              ))}
+            </section>
+          )}
           <div className="sheet-grid-2">
             <section className="box">
               <div className="field-label center">Species traits</div>

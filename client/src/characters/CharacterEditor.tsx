@@ -6,6 +6,7 @@ import {
   derive,
   emptyCharacter,
   maxPossibleHp,
+  bonusHp,
   mod,
   signed,
   withSummary,
@@ -13,6 +14,7 @@ import {
   type RulesData,
 } from '../../../shared/rules.ts';
 import { randomName } from '../rules/index.ts';
+import { RuleChoices } from './RuleChoices.tsx';
 
 interface Props {
   rules: RulesData;
@@ -28,7 +30,10 @@ interface Props {
  * but never blocks: the table's word goes.
  */
 export function CharacterEditor({ rules, initial, onSave, onCancel, onDelete }: Props) {
-  const [c, setC] = useState<Character>(() => initial ?? { ...emptyCharacter(), createdWith: 'manual', abilityMethod: 'manual' });
+  const [c, setC] = useState<Character>(() =>
+    initial ? { ...emptyCharacter(), ...initial, choices: initial.choices ?? {}, customFeatures: initial.customFeatures ?? [], autoUsed: initial.autoUsed ?? {} } : { ...emptyCharacter(), createdWith: 'manual', abilityMethod: 'manual' },
+  );
+  const [newFeature, setNewFeature] = useState({ name: '', description: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [itemQuery, setItemQuery] = useState('');
@@ -43,8 +48,8 @@ export function CharacterEditor({ rules, initial, onSave, onCancel, onDelete }: 
   // ---- warnings: things that probably aren't right (but are allowed) ----
   const warnings: string[] = [];
   if (cls) {
-    if (c.hp.max > maxPossibleHp(cls.hitDie, c.level, conMod))
-      warnings.push(`${c.hp.max} hit points is more than a level ${c.level} ${cls.name} can have (at most ${maxPossibleHp(cls.hitDie, c.level, conMod)}).`);
+    const most = maxPossibleHp(cls.hitDie, c.level, conMod) + bonusHp(c);
+    if (c.hp.max > most) warnings.push(`${c.hp.max} hit points is more than a level ${c.level} ${cls.name} can have (at most ${most}).`);
     const expectedSkills = cls.skillChoice.choose + (rules.backgrounds.find((b) => b.index === c.backgroundIndex)?.skills.length ?? 2);
     if (c.skills.length > expectedSkills + 2) warnings.push(`${c.skills.length} skill proficiencies is more than usual (about ${expectedSkills}).`);
     const row = cls.levels.find((l) => l.level === c.level);
@@ -188,8 +193,8 @@ export function CharacterEditor({ rules, initial, onSave, onCancel, onDelete }: 
       </div>
       {cls && (
         <p className="hint">
-          Average for a level {c.level} {cls.name}: {averageHp(cls.hitDie, c.level, conMod)} HP.{' '}
-          <button className="text-button" onClick={() => { const hp = averageHp(cls.hitDie, c.level, conMod); set({ hp: { ...c.hp, max: hp, current: hp } }); }}>
+          Average for a level {c.level} {cls.name}: {averageHp(cls.hitDie, c.level, conMod) + bonusHp(c)} HP.{' '}
+          <button className="text-button" onClick={() => { const hp = averageHp(cls.hitDie, c.level, conMod) + bonusHp(c); set({ hp: { ...c.hp, max: hp, current: hp } }); }}>
             Use average
           </button>
         </p>
@@ -260,6 +265,39 @@ export function CharacterEditor({ rules, initial, onSave, onCancel, onDelete }: 
           ))}
         </div>
       )}
+
+      {c.classIndex && c.speciesIndex && (
+        <>
+          <h3>Rule choices</h3>
+          <RuleChoices character={c} rules={rules} onChange={(choices) => set({ choices })} />
+        </>
+      )}
+
+      <h3>Own features &amp; notes</h3>
+      <p className="hint">Anything special about this character: a homebrew trait, a boon from the DM, a curse…</p>
+      <ul className="list compact">
+        {c.customFeatures.map((f, i) => (
+          <li key={i}>
+            <div className="grow">
+              <strong>{f.name}</strong>
+              <div className="hint">{f.description}</div>
+            </div>
+            <button className="text-button" onClick={() => set({ customFeatures: c.customFeatures.filter((_, j) => j !== i) })}>Remove</button>
+          </li>
+        ))}
+      </ul>
+      <input value={newFeature.name} onChange={(e) => setNewFeature({ ...newFeature, name: e.target.value })} placeholder="Feature name" aria-label="Own feature name" />
+      <textarea value={newFeature.description} onChange={(e) => setNewFeature({ ...newFeature, description: e.target.value })} placeholder="What it does" rows={2} aria-label="Own feature description" />
+      <button
+        className="button small"
+        disabled={!newFeature.name.trim()}
+        onClick={() => {
+          set({ customFeatures: [...c.customFeatures, { name: newFeature.name.trim(), description: newFeature.description.trim() }] });
+          setNewFeature({ name: '', description: '' });
+        }}
+      >
+        Add feature
+      </button>
 
       <h3>About</h3>
       <label>

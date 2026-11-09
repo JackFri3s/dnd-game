@@ -9,6 +9,7 @@ import {
   mod,
   signed,
   withSummary,
+  bonusHp,
   type Ability,
   type Character,
   type EquipmentOption,
@@ -19,9 +20,11 @@ import { CLASS_BLURBS, STANDARD_LANGUAGES, randomName } from '../rules/index.ts'
 import { formatDistance, useSettings } from '../settings.ts';
 import { CharacterSheet } from './CharacterSheet.tsx';
 import { expandEquipment } from './assemble.ts';
+import { RuleChoices } from './RuleChoices.tsx';
+import { choicesComplete, neededChoices } from './choices.ts';
 
 type Method = 'roll' | 'array' | 'pointbuy';
-const STEPS = ['Class', 'Origin', 'Abilities', 'Skills', 'Equipment', 'Spells', 'Details', 'Review'] as const;
+const STEPS = ['Class', 'Origin', 'Abilities', 'Skills', 'Options', 'Equipment', 'Spells', 'Details', 'Review'] as const;
 type Step = (typeof STEPS)[number];
 
 interface Props {
@@ -57,6 +60,7 @@ export function CharacterBuilder({ rules, rollDice, onSave, onCancel }: Props) {
   const [alignment, setAlignment] = useState('');
   const [languages, setLanguages] = useState<string[]>([]);
   const [details, setDetails] = useState(emptyCharacter().details);
+  const [choices, setChoices] = useState<Character['choices']>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,7 +69,7 @@ export function CharacterBuilder({ rules, rollDice, onSave, onCancel }: Props) {
   const species = rules.species.find((s) => s.index === speciesIndex);
   const level1 = cls?.levels[0];
   const isCaster = !!cls?.spellcasting && !!((level1?.cantrips ?? 0) + (level1?.prepared ?? 0));
-  const steps = STEPS.filter((s) => s !== 'Spells' || isCaster);
+
 
   // ---- ability scores ----
   const base: Record<Ability, number | null> =
@@ -101,7 +105,7 @@ export function CharacterBuilder({ rules, rollDice, onSave, onCancel }: Props) {
     const cOpt = cls?.equipment.find((o) => o.label === classEquip);
     const bOpt = background?.equipment.find((o) => o.label === bgEquip);
     const { items, gold } = expandEquipment(rules, [cOpt, bOpt]);
-    const hpMax = Math.max(1, (cls?.hitDie ?? 8) + mod(finalScores.con));
+    const hpMax = Math.max(1, (cls?.hitDie ?? 8) + mod(finalScores.con) + bonusHp({ speciesIndex, level: 1 }));
     const feats = background ? [background.feat.index] : [];
     return withSummary(
       {
@@ -123,17 +127,20 @@ export function CharacterBuilder({ rules, rollDice, onSave, onCancel }: Props) {
         spells,
         hp: { max: hpMax, current: hpMax, temp: 0 },
         details,
+        choices,
         createdWith: 'builder',
       },
       rules,
     );
   })();
 
+  const steps = STEPS.filter((s) => (s !== 'Spells' || isCaster) && (s !== 'Options' || (cls && species && neededChoices(character, rules).length > 0)));
   const canContinue: Record<Step, boolean> = {
     Class: !!cls,
     Origin: !!background && !!species && (!species.subspecies.length || !!subspeciesIndex),
     Abilities: !!abilitiesDone,
     Skills: skills.length === skillsNeeded,
+    Options: choicesComplete(character, rules),
     Equipment: true,
     Spells: cantrips.length === (level1?.cantrips ?? 0) && spells.length === (level1?.prepared ?? 0),
     Details: !!name.trim() && languages.length === 2,
@@ -395,6 +402,13 @@ export function CharacterBuilder({ rules, rollDice, onSave, onCancel }: Props) {
               );
             })}
           </div>
+        </>
+      )}
+
+      {step === 'Options' && (
+        <>
+          <p className="hint">Your class, species and feats let you choose a few things.</p>
+          <RuleChoices character={character} rules={rules} onChange={setChoices} />
         </>
       )}
 

@@ -7,8 +7,9 @@ import { CharacterSheet } from './CharacterSheet.tsx';
 import { CharacterBuilder } from './CharacterBuilder.tsx';
 import { CharacterEditor } from './CharacterEditor.tsx';
 import { QuickRoll } from './QuickRoll.tsx';
+import { LevelUp } from './LevelUp.tsx';
 
-type Mode = 'sheet' | 'choose' | 'builder' | 'editor' | 'quick';
+type Mode = 'sheet' | 'choose' | 'builder' | 'editor' | 'quick' | 'levelup';
 
 /**
  * Everything about one character, as a full-screen panel: create one (guided or
@@ -85,6 +86,8 @@ export function CharacterScreen({
               <span className="hint">Already have a character on paper or in another app? Fill it in here.</span>
             </button>
           </div>
+        ) : mode === 'levelup' && character ? (
+          <LevelUp character={character} rules={rules} rollDice={(label, groups, modifier) => rollDice(label, groups, modifier)} onSave={saveAndShow} onCancel={() => setMode('sheet')} />
         ) : mode === 'quick' ? (
           <QuickRoll rules={rules} rollDice={(label, groups) => rollDice(label, groups)} onSave={saveAndShow} onCancel={() => setMode('choose')} />
         ) : mode === 'builder' ? (
@@ -105,6 +108,7 @@ export function CharacterScreen({
               editable={editable}
               onSave={save}
               onEdit={() => setMode('editor')}
+              onLevelUp={() => setMode('levelup')}
               onRoll={
                 editable
                   ? (label, modifier, dice) => rollDice(label, dice?.length ? dice : [{ count: 1, sides: 20 }], modifier).then(setLastRoll, () => {})

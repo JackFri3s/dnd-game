@@ -555,3 +555,8 @@ body:has(.overlay) { overflow: hidden; }
 [data-style='parchment'] .pill.prof { border-color: var(--primary); }
 [data-style='parchment'] .token-ring { fill: var(--board); }
 .map-board.aiming .table-frame, .map-board.aiming .table-frame * { pointer-events: none; }
+.prof-dot.expert { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--text); }
+.senses { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 2px 14px; }
+.pool { min-width: 52px; text-align: center; font-weight: 600; }
+.rests { justify-content: flex-end; margin-top: 10px; }
+.head-buttons { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }

@@ -933,6 +933,16 @@ function sanitizeCharacter(raw: unknown): Character {
     inspiration: !!c.inspiration,
     hitDiceSpent: n(c.hitDiceSpent, 0, 20, 0),
     deathSaves: { successes: n(c.deathSaves?.successes, 0, 3, 0), failures: n(c.deathSaves?.failures, 0, 3, 0) },
+    autoUsed: Object.fromEntries(
+      Object.entries(c.autoUsed && typeof c.autoUsed === 'object' ? c.autoUsed : {})
+        .slice(0, 40)
+        .map(([k, v]) => [str(k, 40), n(v, 0, 500, 0)]),
+    ),
+    choices: sanitizeChoices(c.choices),
+    customFeatures: (Array.isArray(c.customFeatures) ? c.customFeatures : []).slice(0, 40).map((f) => ({
+      name: str(f?.name, 80) || 'Feature',
+      description: str(f?.description, 4000),
+    })),
     trackers: (Array.isArray(c.trackers) ? c.trackers : []).slice(0, 30).map((t) => ({
       name: str(t?.name, 60) || 'Feature',
       max: n(t?.max, 1, 99, 1),
@@ -994,4 +1004,39 @@ function parseExport(data: unknown): CampaignExport {
     name: cleanTitle(d.name) || 'Imported campaign',
     snapshots: Array.isArray(d.snapshots) ? d.snapshots.filter((s) => s?.info && validWorld(s.world)).slice(0, 200) : [],
   };
+}
+
+const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
+
+/** Keeps only well-formed rule choices (see CharacterChoices). */
+function sanitizeChoices(raw: unknown): Character['choices'] {
+  const c = (raw && typeof raw === 'object' ? raw : {}) as Character['choices'];
+  const str = (v: unknown) => (typeof v === 'string' ? v.slice(0, 60) : undefined);
+  const strs = (v: unknown, max: number) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, max).map((x) => x.slice(0, 60)) : undefined);
+  const ability = (v: unknown) => (ABILITY_KEYS as readonly string[]).includes(v as string) ? (v as (typeof ABILITY_KEYS)[number]) : undefined;
+  const out: Character['choices'] = {};
+  if (str(c.fightingStyle)) out.fightingStyle = str(c.fightingStyle);
+  if (strs(c.expertise, 12)) out.expertise = strs(c.expertise, 12);
+  if (str(c.speciesSkill)) out.speciesSkill = str(c.speciesSkill);
+  if (str(c.originFeat)) out.originFeat = str(c.originFeat);
+  if (strs(c.skilled, 3)) out.skilled = strs(c.skilled, 3);
+  if (ability(c.lineageAbility)) out.lineageAbility = ability(c.lineageAbility);
+  if (str(c.size)) out.size = str(c.size);
+  if (Array.isArray(c.magicInitiate)) {
+    out.magicInitiate = c.magicInitiate.slice(0, 3).map((m) => ({
+      list: str(m?.list) ?? 'wizard',
+      ability: ability(m?.ability) ?? 'int',
+      cantrips: strs(m?.cantrips, 2) ?? [],
+      spell: str(m?.spell) ?? '',
+    }));
+  }
+  if (Array.isArray(c.levelUps)) {
+    out.levelUps = c.levelUps.slice(0, 20).map((l) => ({
+      level: Math.min(20, Math.max(2, Math.round(Number(l?.level) || 2))),
+      hp: Math.min(30, Math.max(0, Math.round(Number(l?.hp) || 0))),
+      ...(l?.asi ? { asi: Object.fromEntries(Object.entries(l.asi).filter(([k]) => ability(k)).map(([k, v]) => [k, Math.min(2, Math.max(0, Math.round(Number(v) || 0)))])) } : {}),
+      ...(str(l?.feat) ? { feat: str(l?.feat) } : {}),
+    }));
+  }
+  return out;
 }

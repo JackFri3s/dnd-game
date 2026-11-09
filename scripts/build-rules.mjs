@@ -110,6 +110,12 @@ const levelRows = (cls) =>
     .sort((a, b) => a.level - b.level)
     .map((l) => {
       const row = { level: l.level, profBonus: l.prof_bonus, features: (l.features ?? []).map((f) => f.index) };
+      if (l.class_specific) {
+        // e.g. rage_count, sneak_attack {dice_count, dice_value}, martial_arts_die
+        row.numbers = Object.fromEntries(
+          Object.entries(l.class_specific).map(([k, v]) => [k, typeof v === 'object' && v ? `${v.dice_count}d${v.dice_value}` : v]),
+        );
+      }
       const sc = l.spellcasting;
       if (sc) {
         row.cantrips = sc.cantrips_known ?? 0;
@@ -147,12 +153,13 @@ const data = {
   species: species.map((s) => ({
     index: s.index,
     name: s.name,
-    size: s.size,
+    size: s.size ?? (s.size_options?.from?.options ?? []).map((o) => o.size).join(' or '),
+    ...(s.size_options ? { sizeOptions: s.size_options.from.options.map((o) => o.size) } : {}),
     speed: s.speed,
     traits: s.traits.map((t) => t.index),
     subspecies: (s.subspecies ?? []).map((ref) => {
       const sub = subspecies.find((x) => x.index === ref.index);
-      return { index: ref.index, name: ref.name, traits: (sub?.traits ?? []).map((t) => t.index) };
+      return { index: ref.index, name: ref.name, traits: (sub?.traits ?? []).map((t) => t.index), traitLevels: Object.fromEntries((sub?.traits ?? []).map((t) => [t.index, t.level ?? 1])) };
     }),
   })),
   backgrounds: backgrounds.map((b) => ({
@@ -164,11 +171,16 @@ const data = {
     tools: b.proficiencies.filter((p) => !p.index.startsWith('skill-')).map((p) => p.name.replace(/^Tool: /, '')),
     equipment: equipmentOptions(b.equipment_options),
   })),
-  feats: feats.map((f) => ({ index: f.index, name: f.name, description: f.description ?? '' })),
+  feats: feats.map((f) => ({ index: f.index, name: f.name, type: f.type ?? 'general', ...(f.prerequisites?.minimum_level ? { minLevel: f.prerequisites.minimum_level } : {}), description: f.description ?? '' })),
   traits: traits.map((t) => ({ index: t.index, name: t.name, description: t.description ?? '' })),
-  features: features
-    .filter((f) => !f.subclass)
-    .map((f) => ({ index: f.index, name: f.name, class: f.class?.index ?? '', level: f.level?.index ? Number(f.level.index.split('-').pop()) : 1, description: f.description ?? '' })),
+  features: features.map((f) => ({
+    index: f.index,
+    name: f.name,
+    class: f.class?.index ?? '',
+    ...(f.subclass ? { subclass: f.subclass.index } : {}),
+    level: f.level?.index ? Number(f.level.index.split('-').pop()) : 1,
+    description: f.description ?? '',
+  })),
   spells: spells.map((s) => ({
     index: s.index,
     name: s.name,
@@ -200,6 +212,7 @@ const data = {
     } else if (e.damage) {
       item.kind = 'weapon';
       item.weapon = {
+        category: cats.includes('martial-weapons') ? 'martial' : 'simple',
         damage: e.damage.damage_dice,
         type: e.damage.damage_type?.name ?? '',
         properties: (e.properties ?? []).map((p) => p.name),
