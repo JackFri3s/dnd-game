@@ -17,6 +17,10 @@ export function Home() {
           <span>Distances (hexes, feet, metres) and appearance.</span>
         </a>
       </nav>
+      <p className="hint credits">
+        Includes material from the System Reference Document 5.2.1 by Wizards of the Coast LLC, licensed under{' '}
+        <a href="https://creativecommons.org/licenses/by/4.0/legalcode">CC BY 4.0</a>.
+      </p>
     </main>
   );
 }

@@ -7,6 +7,8 @@ import { PlayerGame } from './PlayerGame.tsx';
 import { DmGame } from './DmGame.tsx';
 import { CalibrationControls } from '../components/CalibrationControls.tsx';
 import { CampaignPanel } from '../components/CampaignPanel.tsx';
+import { CharacterScreen } from '../characters/CharacterScreen.tsx';
+import { CharacterList } from '../characters/CharacterList.tsx';
 
 type Role = 'player' | 'dm';
 const stores = { player: new GameStore('player'), dm: new GameStore('dm') };
@@ -178,6 +180,8 @@ function PlayerLobby({
   onSwitchRole: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [showCharacter, setShowCharacter] = useState(false);
+  const myCharacter = state.characters.find((c) => c.ownerId === me.id) ?? null;
   const taken = new Set(state.members.filter((m) => m.role === 'player' && m.id !== me.id).map((m) => m.seat));
   const dm = state.members.find((m) => m.role === 'dm');
   const others = state.members.filter((m) => m.role === 'player' && m.id !== me.id);
@@ -197,6 +201,25 @@ function PlayerLobby({
         Waiting for the Dungeon Master to start
         {state.campaign ? <> <strong>{state.campaign.name}</strong></> : ' the campaign'}.
       </p>
+      <div className="character-card">
+        <div className="label">Your character</div>
+        {myCharacter ? (
+          <div className="row">
+            <div className="grow">
+              <strong data-testid="my-character">{myCharacter.name}</strong>
+              <div className="hint">{myCharacter.summary.classLine}</div>
+            </div>
+            <button className="button small" onClick={() => setShowCharacter(true)}>Open</button>
+          </div>
+        ) : state.campaign ? (
+          <button className="button primary block" onClick={() => setShowCharacter(true)} data-testid="create-character">
+            Create your character
+          </button>
+        ) : (
+          <p className="hint">You can create your character once the Dungeon Master has chosen the campaign.</p>
+        )}
+      </div>
+      {showCharacter && <CharacterScreen store={store} character={myCharacter} editable onClose={() => setShowCharacter(false)} />}
       <fieldset>
         <legend>Your seat</legend>
         <SeatPicker value={me.seat} taken={taken} onChange={changeSeat} />
@@ -257,6 +280,13 @@ function DmLobby({
         </button>
         <p className="hint">Players can still join after the start: the join code stays visible on the Main Screen.</p>
       </div>
+
+      {state.campaign && (
+        <div className="card">
+          <h3>Characters</h3>
+          <CharacterList store={store} state={state} />
+        </div>
+      )}
 
       <div className="card">
         <h3>Main Screen size</h3>

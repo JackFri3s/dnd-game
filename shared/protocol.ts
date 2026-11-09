@@ -1,5 +1,8 @@
 // Messages and data shared between the game server and every screen.
 
+import type { Character } from './rules.ts';
+export type { Character };
+
 export type Role = 'table' | 'player' | 'dm';
 
 /**
@@ -53,6 +56,7 @@ export interface Token {
   kind: TokenKind;
   ownerId: string | null; // the player who controls it (null = DM only)
   speedFt: number;
+  characterId?: string; // the character this token stands for
 }
 
 /** A movement or range area shown around a token on every screen. */
@@ -69,6 +73,24 @@ export interface World {
   view: { x: number; y: number };
   highlight: Highlight | null;
   nextTokenId: number;
+  characters: Record<string, Character>;
+}
+
+/** A dice roll made through the app; shown on the Main Screen at the roller's seat. */
+export interface DiceRoll {
+  id: string;
+  byId: string;
+  byName: string;
+  label: string; // e.g. "Strength (4d6, drop lowest)"
+  groups: { sides: number; rolls: number[]; kept: number[]; total: number }[];
+  modifier: number; // added once to the whole roll (e.g. +5 for a skill check)
+  total: number; // all kept dice + modifier
+  at: number;
+}
+export interface DiceRequest {
+  label: string;
+  groups: { count: number; sides: number; dropLowest?: number }[];
+  modifier?: number;
 }
 
 export interface CampaignSummary {
@@ -98,6 +120,8 @@ export interface RoomState {
   board: { cols: number; rows: number };
   tokens: Token[];
   highlight: Highlight | null;
+  characters: Character[];
+  rolls: DiceRoll[]; // the latest rolls, newest first
 }
 
 /** Standard CSS pixels per mm (96 per inch): used until the Main Screen is calibrated. */
@@ -149,6 +173,14 @@ export interface Requests {
   // DM: hand a player token to another player (e.g. they use a different phone this time)
   'token:assign': { args: { tokenId: string; memberId: string | null }; result: null };
 
+  // ---- characters ----
+  // Players save their own character; the DM can save any (e.g. pre-made ones).
+  'character:save': { args: { character: Character }; result: { id: string } };
+  'character:delete': { args: { id: string }; result: null };
+  'character:assign': { args: { id: string; memberId: string | null }; result: null }; // DM
+  // ---- dice (rolled by the server, so everyone can trust them) ----
+  'dice:roll': { args: DiceRequest; result: { roll: DiceRoll } };
+
   // ---- campaigns (DM only) ----
   'campaign:list': { args: Record<string, never>; result: { campaigns: CampaignSummary[]; current: string | null } };
   'campaign:create': { args: { name: string }; result: { campaign: CampaignSummary } };
@@ -174,6 +206,7 @@ export type ServerMessage =
   | { type: 'reply'; id: number; ok: false; error: string }
   | { type: 'room:state'; state: RoomState }
   | { type: 'notice'; text: string }
+  | { type: 'dice'; roll: DiceRoll }
   | { type: 'room:kicked' };
 
 /** WebSocket close codes with a special meaning (the client should not reconnect). */

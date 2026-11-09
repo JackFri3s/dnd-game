@@ -20,6 +20,8 @@ import {
   type Token,
   type World,
   type CampaignSummary,
+  type Character,
+  type DiceRoll,
 } from '../shared/protocol.ts';
 import type { CampaignExport } from './campaign.ts';
 import { boardBounds, cellToHex, hexToPoint, hexesInRange, hexKey, onBoard, pointToHex } from '../shared/hex.ts';
@@ -42,6 +44,8 @@ interface StoredRoom {
   nextTokenId: number;
   /** The campaign loaded in this game; its world is saved to it after every change. */
   campaign: { key: string; name: string } | null;
+  characters: Record<string, Character>;
+  rolls: DiceRoll[];
 }
 
 const KEY_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -50,11 +54,18 @@ const KEY_LENGTH = 10;
 function emptyWorld(): World {
   const board = DEFAULT_BOARD;
   const b = boardBounds(board);
-  return { board, tokens: {}, view: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, highlight: null, nextTokenId: 1 };
+  return { board, tokens: {}, view: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, highlight: null, nextTokenId: 1, characters: {} };
 }
 
 function worldOf(room: StoredRoom): World {
-  return { board: room.board, tokens: room.tokens, view: room.view, highlight: room.highlight, nextTokenId: room.nextTokenId };
+  return {
+    board: room.board,
+    tokens: room.tokens,
+    view: room.view,
+    highlight: room.highlight,
+    nextTokenId: room.nextTokenId,
+    characters: room.characters,
+  };
 }
 
 function applyWorld(room: StoredRoom, world: World) {
@@ -63,6 +74,7 @@ function applyWorld(room: StoredRoom, world: World) {
   room.view = world.view;
   room.highlight = world.highlight;
   room.nextTokenId = world.nextTokenId;
+  room.characters = world.characters ?? {};
 }
 
 const DEFAULT_BOARD = { cols: 40, rows: 28 };
@@ -78,6 +90,8 @@ function withDefaults(room: Partial<StoredRoom> & Pick<StoredRoom, 'code' | 'tab
     highlight: null,
     nextTokenId: 1,
     campaign: null,
+    characters: {},
+    rolls: [],
     ...room,
     board,
     table: {
@@ -354,6 +368,69 @@ export class GameRoom extends DurableObject<Env> {
         return this.commit(room);
       }
 
+      // ---------- characters ----------
+
+      case 'character:save': {
+        if (!me || me.role === 'table') throw new GameError('Not allowed.');
+        const incoming = sanitizeCharacter(msg.character);
+        const existing = incoming.id ? room.characters[incoming.id] : undefined;
+        if (me.role === 'player') {
+          if (existing && existing.ownerId !== me.id) throw new GameError('You can only change your own character.');
+          incoming.ownerId = me.id;
+        } else {
+          // The DM keeps the current player, or makes an unplayed (pre-made) character.
+          incoming.ownerId = existing ? existing.ownerId : null;
+        }
+        if (!existing) incoming.id = `c${crypto.randomUUID().slice(0, 8)}`;
+        incoming.updatedAt = Date.now();
+        room.characters[incoming.id] = incoming;
+        syncCharacterToken(room, incoming);
+        await this.commit(room);
+        return { id: incoming.id } satisfies Requests['character:save']['result'];
+      }
+
+      case 'character:delete': {
+        const c = room.characters[String(msg.id)];
+        if (!c) throw new GameError('Character not found.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && c.ownerId === me.id)) throw new GameError('Not allowed.');
+        delete room.characters[c.id];
+        for (const t of Object.values(room.tokens)) if (t.characterId === c.id) delete t.characterId;
+        return this.commit(room);
+      }
+
+      case 'character:assign': {
+        requireRole(me, 'dm');
+        const c = room.characters[String(msg.id)];
+        if (!c) throw new GameError('Character not found.');
+        const target = msg.memberId ? room.members[msg.memberId] : null;
+        if (msg.memberId && target?.role !== 'player') throw new GameError('Player not found.');
+        // A player plays one character: hand any other one back.
+        if (target) for (const other of Object.values(room.characters)) if (other.ownerId === target.id && other.id !== c.id) other.ownerId = null;
+        c.ownerId = target?.id ?? null;
+        const token = Object.values(room.tokens).find((t) => t.characterId === c.id);
+        if (token && target) {
+          for (const t of Object.values(room.tokens)) if (t.ownerId === target.id && t.id !== token.id) delete room.tokens[t.id];
+          Object.assign(token, { ownerId: target.id, color: target.color });
+        } else if (token) token.ownerId = null;
+        else if (target && room.phase === 'playing') syncCharacterToken(room, c);
+        return this.commit(room);
+      }
+
+      // ---------- dice ----------
+
+      case 'dice:roll': {
+        if (!me || me.role === 'table') throw new GameError('Not allowed.');
+        const roll = rollDice(msg, me);
+        room.rolls = [roll, ...room.rolls].slice(0, 20);
+        await this.save();
+        for (const s of this.ctx.getWebSockets()) {
+          const { clientId: id } = s.deserializeAttachment() as Attachment;
+          if (room.members[id]) send(s, { type: 'dice', roll });
+        }
+        this.broadcast(room);
+        return { roll } satisfies Requests['dice:roll']['result'];
+      }
+
       // ---------- campaigns ----------
 
       case 'campaign:list': {
@@ -588,6 +665,8 @@ export class GameRoom extends DurableObject<Env> {
       board: room.board,
       tokens: Object.values(room.tokens),
       highlight: room.highlight,
+      characters: Object.values(room.characters),
+      rolls: room.rolls,
     };
   }
 
@@ -696,7 +775,130 @@ function addToken(
 
 function ensurePlayerToken(room: StoredRoom, member: StoredMember) {
   if (Object.values(room.tokens).some((t) => t.ownerId === member.id)) return;
-  addToken(room, { name: member.name, kind: 'player', color: member.color, ownerId: member.id, ...freeHexNear(room, viewHex(room)) });
+  const character = Object.values(room.characters).find((c) => c.ownerId === member.id);
+  const token = addToken(room, {
+    name: character?.name || member.name,
+    kind: 'player',
+    color: member.color,
+    ownerId: member.id,
+    ...freeHexNear(room, viewHex(room)),
+  });
+  if (character) Object.assign(token, { characterId: character.id, speedFt: character.summary.speedFt });
+}
+
+/** Keeps the token of a character in step with it: name, initials, speed. */
+function syncCharacterToken(room: StoredRoom, c: Character) {
+  let token =
+    Object.values(room.tokens).find((t) => t.characterId === c.id) ??
+    (c.ownerId ? Object.values(room.tokens).find((t) => t.ownerId === c.ownerId && t.kind === 'player') : undefined);
+  if (!token && c.ownerId && room.phase === 'playing' && room.members[c.ownerId]) {
+    ensurePlayerToken(room, room.members[c.ownerId]);
+    token = Object.values(room.tokens).find((t) => t.ownerId === c.ownerId && t.kind === 'player');
+  }
+  if (!token) return;
+  Object.assign(token, { characterId: c.id, name: c.name, label: initials(c.name), speedFt: c.summary.speedFt });
+}
+
+const DICE = new Set([2, 4, 6, 8, 10, 12, 20, 100]);
+
+function rollDice(req: { label?: unknown; groups?: unknown; modifier?: unknown }, me: StoredMember): DiceRoll {
+  const groups = Array.isArray(req.groups) ? req.groups.slice(0, 10) : [];
+  if (!groups.length) throw new GameError('Nothing to roll.');
+  const modifier = Math.round(num(req.modifier ?? 0, -50, 50));
+  const rolled = groups.map((g) => {
+      const count = Math.round(num(g?.count, 1, 20));
+      const sides = Number(g?.sides);
+      if (!DICE.has(sides)) throw new GameError('Unknown die.');
+      const drop = Math.round(num(g?.dropLowest ?? 0, 0, count - 1));
+      const rolls = Array.from({ length: count }, () => randomInt(sides));
+      const sorted = rolls.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+      const dropped = new Set(sorted.slice(0, drop).map((x) => x.i));
+      const kept = rolls.filter((_, i) => !dropped.has(i));
+      return { sides, rolls, kept, total: kept.reduce((a, b) => a + b, 0) };
+  });
+  return {
+    id: crypto.randomUUID(),
+    byId: me.id,
+    byName: me.name,
+    label: cleanTitle(req.label) || 'Roll',
+    at: Date.now(),
+    groups: rolled,
+    modifier,
+    total: rolled.reduce((a, g) => a + g.total, 0) + modifier,
+  };
+}
+
+/** A fair random number from 1 to `sides`. */
+function randomInt(sides: number) {
+  const limit = Math.floor(0x100000000 / sides) * sides;
+  const buf = new Uint32Array(1);
+  do crypto.getRandomValues(buf);
+  while (buf[0] >= limit);
+  return (buf[0] % sides) + 1;
+}
+
+/** Checks a character sent by a device, keeping only known fields with sensible values. */
+function sanitizeCharacter(raw: unknown): Character {
+  const c = raw as Character;
+  if (!c || typeof c !== 'object') throw new GameError('Invalid character.');
+  if (JSON.stringify(c).length > 100_000) throw new GameError('This character is too large to save.');
+  const str = (v: unknown, max = 60) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const strs = (v: unknown, max = 100) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, max).map((x) => x.slice(0, 80)) : []);
+  const n = (v: unknown, min: number, max: number, dflt = min) => (Number.isFinite(Number(v)) ? Math.min(max, Math.max(min, Math.round(Number(v)))) : dflt);
+  const name = str(c.name).trim();
+  if (!name) throw new GameError('Your character needs a name.');
+  const abilities = {} as Character['abilities'];
+  for (const a of ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const) abilities[a] = n(c.abilities?.[a], 1, 30, 10);
+  const maxHp = n(c.hp?.max, 1, 999, 1);
+  return {
+    id: str(c.id, 40),
+    ownerId: null,
+    name,
+    level: n(c.level, 1, 20, 1),
+    classIndex: str(c.classIndex),
+    subclassIndex: c.subclassIndex ? str(c.subclassIndex) : null,
+    speciesIndex: str(c.speciesIndex),
+    subspeciesIndex: c.subspeciesIndex ? str(c.subspeciesIndex) : null,
+    backgroundIndex: str(c.backgroundIndex),
+    alignment: str(c.alignment),
+    abilities,
+    abilityMethod: (['roll', 'array', 'pointbuy', 'manual'] as const).includes(c.abilityMethod) ? c.abilityMethod : 'manual',
+    skills: strs(c.skills, 30),
+    languages: strs(c.languages, 30),
+    feats: strs(c.feats, 30),
+    items: (Array.isArray(c.items) ? c.items : []).slice(0, 200).map((i) => ({
+      index: i?.index ? str(i.index) : null,
+      name: str(i?.name, 80) || 'Item',
+      qty: n(i?.qty, 0, 9999, 1),
+      ...(i?.equipped ? { equipped: true } : {}),
+    })),
+    gold: n(c.gold, 0, 10_000_000, 0),
+    cantrips: strs(c.cantrips, 40),
+    spells: strs(c.spells, 100),
+    hp: { max: maxHp, current: n(c.hp?.current, -999, 999, maxHp), temp: n(c.hp?.temp, 0, 999, 0) },
+    spellSlotsUsed: Array.from({ length: 9 }, (_, i) => n(c.spellSlotsUsed?.[i], 0, 9, 0)),
+    overrides: {
+      ...(c.overrides?.ac !== undefined ? { ac: n(c.overrides.ac, 0, 40) } : {}),
+      ...(c.overrides?.speed !== undefined ? { speed: n(c.overrides.speed, 0, 300) } : {}),
+    },
+    details: {
+      appearance: str(c.details?.appearance, 2000),
+      personality: str(c.details?.personality, 2000),
+      ideals: str(c.details?.ideals, 2000),
+      bonds: str(c.details?.bonds, 2000),
+      flaws: str(c.details?.flaws, 2000),
+      backstory: str(c.details?.backstory, 10000),
+    },
+    summary: {
+      ac: n(c.summary?.ac, 0, 40, 10),
+      speedFt: n(c.summary?.speedFt, 0, 300, 30),
+      initiative: n(c.summary?.initiative, -10, 30, 0),
+      passivePerception: n(c.summary?.passivePerception, 0, 40, 10),
+      classLine: str(c.summary?.classLine, 120),
+    },
+    createdWith: c.createdWith === 'manual' ? 'manual' : 'builder',
+    updatedAt: 0,
+  };
 }
 
 function requireCampaign(room: StoredRoom) {

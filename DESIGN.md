@@ -67,7 +67,7 @@ A digital tabletop role-playing game for a group sitting around a real table. A 
 - Can also create characters (pre-made characters for players, or NPCs).
 
 ### 3.4 Character creation (on any device: players and DM)
-Characters can be made on **anyone's phone or tablet**, before or during a session, and are saved to that person's account so they can be brought into a campaign.
+Characters can be made on **anyone's phone or tablet**, before or during a session. They are saved **in the campaign** (no accounts yet), linked to the player's device; the DM can hand a character to another player. Dice for ability scores (and every other roll made through the app) are **rolled by the server** and shown on the Main Screen, so everyone can trust them.
 
 **Path A: bring an existing character.** Fill in a character you already have (e.g. from a paper sheet): class, level, species, background, ability scores, HP, equipment, spells, and so on. The app checks it against the 2024 rules, warns about anything that doesn't add up (it doesn't block it), and calculates the derived numbers (modifiers, AC, saves, skills, spell save DC).
 

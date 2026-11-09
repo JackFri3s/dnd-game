@@ -10,7 +10,7 @@ See [DESIGN.md](DESIGN.md) for the full plan.
 
 ## Status
 
-Steps 1–3 of the build order are done: **connecting the screens**, **the hex board** and **saving**.
+Steps 1–4 of the build order are done: **connecting the screens**, **the hex board**, **saving** and **rules and characters**.
 
 - Open `/table` on the Main Screen: it shows a game code and QR code. It needs no touch screen.
 - Players scan the QR code (or open `/join`), choose **Player** or **Dungeon Master**, enter their name and pick their seat.
@@ -22,6 +22,8 @@ Steps 1–3 of the build order are done: **connecting the screens**, **the hex b
 - **Save points:** the DM can make save points and go back to any of them (one is made automatically at the start of every session, and before going back).
 - **Backups:** the DM can download a campaign as a file and upload it again. A **campaign key** lets the DM open the campaign from another device.
 - **Settings** (home menu): distances in hexes, feet or metres, and light/dark appearance.
+- **Characters** (step 4): players create their character on their phone, either **step by step** (class, background and species, ability scores by rolling 4d6-drop-lowest, the standard array or point buy, skills, equipment, spells, details) or by **entering an existing character** (the app works out the numbers and warns about anything that doesn't add up). The DM can make pre-made characters and hand characters to players.
+- **Character sheet** on the phone: hit points (damage/heal), AC, speed, abilities, saves, skills, attacks, spells and spell slots, features and traits, equipment. Tap anything to roll it; **dice are rolled by the server** and shown on the Main Screen at the roller's seat.
 
 
 ## Run it on your computer
@@ -57,3 +59,9 @@ You can also deploy from your own computer with `npm run deploy` (it asks you to
 | `worker/` | The game server on Cloudflare: `index.ts` is the front door, `room.ts` is one game, `campaign.ts` stores campaigns and save points (all Durable Objects). |
 | `shared/` | Definitions used by both, like the messages and the seats. |
 | `wrangler.jsonc` | Cloudflare settings. |
+
+## Rules content
+
+The rules come from the **System Reference Document 5.2.1** (the free 2024 rules), via the open-source [5e-database](https://github.com/5e-bits/5e-database) project. `scripts/build-rules.mjs` turns it into `client/src/rules/srd-2024.json`.
+
+> This work includes material from the System Reference Document 5.2.1 ("SRD 5.2.1") by Wizards of the Coast LLC, available at https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative Commons Attribution 4.0 International License, available at https://creativecommons.org/licenses/by/4.0/legalcode.

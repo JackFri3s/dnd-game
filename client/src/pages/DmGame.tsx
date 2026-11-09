@@ -5,13 +5,15 @@ import { HexBoard, type Camera } from '../components/HexBoard.tsx';
 import { CalibrationControls } from '../components/CalibrationControls.tsx';
 import { CampaignPanel } from '../components/CampaignPanel.tsx';
 import { RangeChips } from '../components/RangeChips.tsx';
+import { CharacterList } from '../characters/CharacterList.tsx';
 import { seatNumber } from '../seats.ts';
 
 const TOKEN_SHADES = ['#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3'];
-type Panel = 'token' | 'add' | 'campaign' | 'screen' | 'players';
+type Panel = 'token' | 'add' | 'characters' | 'campaign' | 'screen' | 'players';
 const PANELS: { id: Panel; label: string }[] = [
   { id: 'token', label: 'Selected' },
   { id: 'add', label: 'Add' },
+  { id: 'characters', label: 'Characters' },
   { id: 'campaign', label: 'Campaign' },
   { id: 'screen', label: 'Main Screen' },
   { id: 'players', label: 'Players' },
@@ -123,6 +125,8 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
           ))}
 
         {panel === 'add' && <AddToken store={store} onAdded={(id) => setSelectedId(id)} />}
+
+        {panel === 'characters' && <CharacterList store={store} state={state} />}
 
         {panel === 'campaign' && <CampaignPanel store={store} state={state} />}
 

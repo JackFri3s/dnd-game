@@ -6,6 +6,7 @@ import { SIDE_ROTATION } from '../seats.ts';
 import { HexBoard } from '../components/HexBoard.tsx';
 import { read, write } from '../socket.ts';
 import { CalibrationCard } from '../components/CalibrationCard.tsx';
+import { RollToasts } from '../components/RollToasts.tsx';
 
 const store = new GameStore('table');
 let starting = false; // guards against starting two games at once
@@ -138,6 +139,7 @@ export function TableScreen() {
         );
       })}
 
+      {game.state && <RollToasts state={game.state} />}
       <section className="table-center">
         <h1 className="title small">dnd</h1>
         {error && <p className="error">{error}</p>}
@@ -197,6 +199,7 @@ function TableBoard({ state, code, connected }: { state: RoomState; code: string
         onMoveToken={(token, hex) => store.request('token:move', { tokenId: token.id, ...hex })}
         faceSeats
       />
+      <RollToasts state={state} />
       <div className="table-corner">
         {!connected && <span className="status warn">Reconnecting…</span>}
         <span>

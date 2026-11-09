@@ -4,6 +4,7 @@ import { hexToPoint } from '../../../shared/hex.ts';
 import type { GameStore } from '../game.ts';
 import { HexBoard, type Camera } from '../components/HexBoard.tsx';
 import { RangeChips } from '../components/RangeChips.tsx';
+import { CharacterScreen } from '../characters/CharacterScreen.tsx';
 
 /** A player's phone during play: their own view of the map, and their token's controls. */
 export function PlayerGame({
@@ -23,6 +24,8 @@ export function PlayerGame({
     return { ...at, scale: 56 };
   });
   const [menu, setMenu] = useState(false);
+  const [showCharacter, setShowCharacter] = useState(false);
+  const myCharacter = state.characters.find((c) => c.ownerId === me.id) ?? null;
   const [error, setError] = useState<string | null>(null);
   const run = (p: Promise<unknown>) => p.then(() => setError(null), (e: Error) => setError(e.message));
 
@@ -34,7 +37,10 @@ export function PlayerGame({
     <div className="game-layout" data-testid="player-game">
       <header className="game-bar">
         <span className="badge-dot big" style={{ background: me.color }} />
-        <strong className="grow">{me.name}</strong>
+        <strong className="grow">{myCharacter?.name ?? me.name}</strong>
+        <button className="button small" onClick={() => setShowCharacter(true)} data-testid="open-character">
+          {myCharacter ? 'Character' : 'Create character'}
+        </button>
         <button className="button small" onClick={() => myToken && setCamera({ ...camera, ...hexToPoint(myToken) })}>
           Find me
         </button>
@@ -50,6 +56,7 @@ export function PlayerGame({
           <button className="text-button" onClick={() => store.leave()}>Leave game</button>
         </div>
       )}
+      {showCharacter && <CharacterScreen store={store} character={myCharacter} editable onClose={() => setShowCharacter(false)} />}
       <div className="game-board">
         <HexBoard
           state={state}
