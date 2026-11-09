@@ -3,24 +3,35 @@
 
 import type { Point } from './geometry.ts';
 
-export type PlaceKind = 'blank' | 'village' | 'building' | 'cave';
+export type PlaceKind = 'blank' | 'village' | 'building' | 'cave' | 'dungeon';
 export type BuildingType = 'house' | 'inn' | 'smithy' | 'temple' | 'shop' | 'farm' | 'hall' | 'ruin';
+/** What a floor is made of (interiors, caves and dungeons). */
+export type FloorMaterial = 'wood' | 'stone' | 'flag' | 'earth' | 'tile' | 'cave';
+export type Roof = 'wood' | 'slate' | 'thatch';
 
-/** Things drawn on the map (map units: 1 = 5 ft). */
+/** Things drawn on the map (map units: 1 = 5 ft). Angles `a` are in radians. */
 export type Feature =
   | { t: 'road'; pts: Point[]; w: number }
   | { t: 'square'; poly: Point[] }
-  | { t: 'field'; poly: Point[] }
+  | { t: 'field'; poly: Point[]; a?: number; crop?: 'soil' | 'green' | 'gold' } // a: furrow direction
   | { t: 'water'; pts: Point[]; w: number } // a river
   | { t: 'bridge'; a: Point; b: Point; w: number }
-  | { t: 'building'; poly: Point[]; type: BuildingType; ruined?: boolean; label?: string }
+  | { t: 'building'; poly: Point[]; type: BuildingType; ruined?: boolean; label?: string; roof?: Roof }
   | { t: 'tree'; x: number; y: number; r: number }
   | { t: 'rock'; poly: Point[] }
   | { t: 'fence'; pts: Point[] }
   | { t: 'well'; x: number; y: number }
-  | { t: 'floor'; poly: Point[]; room?: string } // building interiors
-  | { t: 'cells'; d: string } // cave floor, as SVG path data
+  | { t: 'stall'; x: number; y: number; w: number; h: number; a: number; color: string } // market stall
+  | { t: 'floor'; poly: Point[]; room?: string; material?: FloorMaterial } // building interiors
+  | { t: 'cells'; d: string; material?: FloorMaterial } // cave and dungeon floor, as SVG path data
   | { t: 'furniture'; kind: string; x: number; y: number; w: number; h: number; a: number }
+  | { t: 'door'; x: number; y: number; a: number; w: number } // across a doorway, a = direction of the wall
+  | { t: 'window'; x: number; y: number; a: number; w: number }
+  | { t: 'column'; x: number; y: number; r: number; round?: boolean }
+  | { t: 'puddle'; poly: Point[]; kind?: 'water' | 'mud' | 'blood' }
+  | { t: 'rug'; x: number; y: number; w: number; h: number; a: number; color: string }
+  | { t: 'stairs'; x: number; y: number; w: number; h: number; a: number } // steps go down towards angle a
+  | { t: 'debris'; x: number; y: number; r: number }
   | { t: 'label'; x: number; y: number; text: string };
 
 export interface Entrance {
@@ -84,6 +95,7 @@ export const PLACE_KINDS: { kind: PlaceKind; label: string }[] = [
   { kind: 'village', label: 'Village' },
   { kind: 'building', label: 'Building' },
   { kind: 'cave', label: 'Cave' },
+  { kind: 'dungeon', label: 'Dungeon' },
   { kind: 'blank', label: 'Empty map' },
 ];
 
@@ -105,7 +117,9 @@ export const summarize = (p: Place): PlaceSummary => ({ id: p.id, name: p.name, 
 /** What players and the Main Screen may see of a place: no secrets, no hidden doors, no planned monsters. */
 export function publicPlace(p: Place): Place {
   const { encounters: _, ...rest } = p;
-  return { ...rest, npcs: [], entrances: p.entrances.filter((e) => !e.hidden) };
+  // Room names are the DM's notes; only a village's name is written on the map itself.
+  const features = p.kind === 'village' ? p.features : p.features.filter((f) => f.t !== 'label');
+  return { ...rest, features, npcs: [], entrances: p.entrances.filter((e) => !e.hidden) };
 }
 
 /** Whether moving from a to b crosses a wall. */

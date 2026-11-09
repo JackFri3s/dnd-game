@@ -13,7 +13,7 @@ export interface PlacePreview {
   place: Place;
 }
 
-const KIND_LABEL: Record<PlaceKind, string> = { village: 'Village', building: 'Building', cave: 'Cave', blank: 'Empty map' };
+const KIND_LABEL: Record<PlaceKind, string> = { village: 'Village', building: 'Building', cave: 'Cave', dungeon: 'Dungeon', blank: 'Empty map' };
 const ENTRANCE_LABEL: Record<Entrance['kind'], string> = { building: 'Door', cave: 'Cave', deeper: 'Stairs down', exit: 'Way out' };
 
 /** Makes a preview: exactly what the server will make from the same arguments. */
@@ -32,9 +32,11 @@ export function WorldPanel({
   selectedEntranceId,
   onSelectEntrance,
   onFocus,
+  onEdit,
 }: {
   store: GameStore;
   state: RoomState;
+  onEdit: () => void;
   preview: PlacePreview | null;
   onPreview: (p: PlacePreview | null) => void;
   selectedEntranceId: string | null;
@@ -137,6 +139,7 @@ export function WorldPanel({
           selectedEntranceId={selectedEntranceId}
           onSelectEntrance={onSelectEntrance}
           onFocus={onFocus}
+          onEdit={onEdit}
         />
       )}
       {tab === 'new' && <NewPlaceForm partyLevel={partyLevel} onPreview={(args) => onPreview(makePreview(args, place))} />}
@@ -168,9 +171,11 @@ function HereTab({
   selectedEntranceId,
   onSelectEntrance,
   onFocus,
+  onEdit,
 }: {
   store: GameStore;
   state: RoomState;
+  onEdit: () => void;
   place: Place;
   run: (p: Promise<unknown>) => Promise<boolean>;
   busy: boolean;
@@ -238,6 +243,9 @@ function HereTab({
           </button>
         )}
       </div>
+      <button className="button block" onClick={onEdit} data-testid="edit-map">
+        ✎ Edit the map
+      </button>
       {parent && (
         <button className="button block" disabled={busy} onClick={() => run(store.request('place:go', { placeId: parent.id }))} data-testid="go-parent">
           ↩ Take the party back to {parent.name}
@@ -269,6 +277,16 @@ function HereTab({
                 Make what's inside
               </button>
             )}
+            <button
+              className="button"
+              disabled={busy}
+              onClick={() => {
+                const name = prompt('Name', selected.name);
+                if (name) update({ entrance: { entranceId: selected.id, name } });
+              }}
+            >
+              Rename
+            </button>
             {selected.kind !== 'exit' && (
               <button className="button" disabled={busy} onClick={() => update({ entrance: { entranceId: selected.id, hidden: !selected.hidden } })}>
                 {selected.hidden ? 'Show to players' : 'Hide from players'}

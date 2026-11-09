@@ -101,7 +101,9 @@ World / Region map (overland travel, distances in miles)
 - **Generated content per location:** name, layout, terrain and buildings, NPCs (name, role, personality, short description), loot and encounters (from the SRD monster and item lists, scaled to party level).
 - **The DM can always:** regenerate, edit the map by hand, rename things, add or remove NPCs and monsters, or lock a map so it never changes.
 
-**Built in step 7:** places are villages, building interiors, caves and empty maps, linked by entrances (doors, cave mouths, cellar or crypt stairs, tunnels deeper, ways out). Each place is generated from a seed plus the DM's context; the generators run in the shared code, so the DM's preview and the server's result are identical. Places are stored as generated (not regenerated on load), so later changes to the generators never change an existing campaign. The party is always in one place; monsters, NPCs and spell areas stay in the place they're in while the party is elsewhere. Region maps and hand-editing of map shapes (walls, buildings) are not built yet.
+**Built in step 7:** places are villages, building interiors, caves and empty maps, linked by entrances (doors, cave mouths, cellar or crypt stairs, tunnels deeper, ways out). Each place is generated from a seed plus the DM's context; the generators run in the shared code, so the DM's preview and the server's result are identical. Places are stored as generated (not regenerated on load), so later changes to the generators never change an existing campaign. The party is always in one place; monsters, NPCs and spell areas stay in the place they're in while the party is elsewhere. The DM can edit every map by hand (move, resize and turn buildings and furniture, draw buildings, rooms and walls, cut doors, add and erase things). Region maps are not built yet.
+
+**Map art:** villages are painted (inspired by Watabou's village maps); interiors, dungeons and caves are ink on paper with coloured floors (inspired by Watabou's one-page dungeons). The drawing is worked out on each screen from the place and its seed (map/art.ts), with everything of one kind merged into one SVG path so large maps stay fast on phones.
 
 ### 4a. DM-guided generation (story context)
 The story is the DM's, so the DM can steer what gets generated. This is **optional**: with no input, the generator picks everything at random.
@@ -226,6 +228,38 @@ Decided in v0.3: AI text generation off for now (maybe later, as an option) ✔ 
 
 Still open:
 1. **Large creatures:** token sizes for Large/Huge/Gargantuan (10/15/20 ft across).
+
+## 11a. What could come next (roadmap)
+
+Ideas for after step 7, grouped. ★ = suggested next.
+
+**The world and its maps**
+- ★ **Fog of war and line of sight**: hide what the party can't see yet (manual, or worked out from walls and the tokens' vision), with light sources and darkvision.
+- ★ **Doors that open, close and lock**, secret doors and traps (found with Perception, triggered by walking).
+- ★ **Cover and difficult terrain**: walls give half or three-quarters cover to attacks; water, rubble and undergrowth cost extra movement.
+- A **region map** for travelling between villages, woods and dungeons (miles, travel time, random encounters on the road).
+- Bigger places: **towns and cities** (districts, walls, a keep), more buildings (mill, stables, watchtower, docks), **upstairs floors** and towers.
+- Editor extras: draw roads, rivers and fields, paint terrain, copy and paste, change a map's size, stamp your own images.
+- **Large creatures** (Large/Huge/Gargantuan token sizes), flying and elevation.
+- Weather and **day/night** on the map; printing a map at true scale for a battle mat.
+
+**Playing the game**
+- ★ **Treasure and shops**: loot from defeated monsters, gold, shops in the village with prices, items going into inventories.
+- ★ **Encounter builder**: XP budget for the party (easy/medium/hard), XP awards and levelling up from the DM.
+- Spell and condition **durations** counted in rounds; reactions such as Shield and Counterspell; legendary and lair actions.
+- **Quests and rumours** made with the village (and a quest log on the players' phones).
+- A **session log and recap** ("last time on..."), and undo for the DM's last action.
+- Party **rests** started by the DM for everyone.
+
+**Around the table**
+- **Handouts**: the DM shows a picture or a letter on the Main Screen or on one player's phone; private messages between DM and player.
+- **Sound**: ambience per place (tavern, cave, rain), dice sounds, music the DM can change.
+- **Animated dice** and spell effects on the Main Screen.
+
+**Behind the scenes**
+- **Accounts** instead of campaign keys, and sharing a campaign with a co-DM.
+- Automated tests run on every change (GitHub Actions) before it goes live.
+- Optional **AI text** for names, descriptions and NPC dialogue (switchable, as decided earlier).
 
 ## 12. Build order (milestones)
 

@@ -366,6 +366,8 @@ export interface Requests {
     result: null;
   };
   'place:delete': { args: { placeId: string }; result: null }; // with everything inside it
+  /** DM: the map drawn by hand (what's on it, its walls and its ways in and out). */
+  'place:map': { args: { placeId: string; features: Place['features']; walls: Place['walls']; entrances: Place['entrances'] }; result: null };
 }
 export type RequestName = keyof Requests;
 

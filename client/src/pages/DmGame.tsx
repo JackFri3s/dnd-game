@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Member, RoomState, TokenKind } from '../../../shared/protocol.ts';
 import type { GameStore } from '../game.ts';
 import { nextPanelSide, usePanelSide } from '../settings.ts';
@@ -13,6 +13,7 @@ import { CharacterList } from '../characters/CharacterList.tsx';
 import { HomebrewPanel } from '../characters/HomebrewPanel.tsx';
 import { seatNumber } from '../seats.ts';
 import { WorldPanel, type PlacePreview } from '../components/WorldPanel.tsx';
+import { MapEditorPanel, useMapEditor } from '../components/MapEditor.tsx';
 
 const TOKEN_SHADES = ['#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3'];
 type Panel = 'token' | 'combat' | 'add' | 'world' | 'party' | 'campaign' | 'table';
@@ -53,6 +54,8 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const selectedMonster = selected?.stats?.monster ? monsters?.find((m) => m.index === selected.stats!.monster) : undefined;
   const [preview, setPreview] = useState<PlacePreview | null>(null);
   const [entranceId, setEntranceId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const editor = useMapEditor(store, state.place, camera.scale);
 
   // A new place: look at where the party arrives.
   useEffect(() => {
@@ -60,15 +63,20 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
     setEntranceId(null);
   }, [state.placeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The latest view, for code that runs after an await (the party may have moved meanwhile).
+  const viewRef = useRef(state.view);
+  viewRef.current = state.view;
   function showPreview(p: PlacePreview | null) {
     setPreview(p);
     if (p) setCamera((c) => ({ ...c, x: p.place.size.w / 2, y: p.place.size.h / 2, scale: Math.min(c.scale, 14) }));
-    else setCamera((c) => ({ ...c, ...state.view }));
+    else setCamera((c) => ({ ...c, ...viewRef.current }));
   }
   // While previewing, the DM's map shows the preview instead of the real place.
   const mapState: RoomState = preview
     ? { ...state, place: preview.place, board: preview.place.size, tokens: [], areas: [], highlight: null }
-    : state;
+    : editing && editor.view
+      ? { ...state, place: editor.view }
+      : state;
 
   function kick(p: Member) {
     if (!confirm(`Remove ${p.name} from the game? Their token stays on the map.`)) return;
@@ -112,7 +120,8 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
           state={mapState}
           camera={camera}
           onCameraChange={setCamera}
-          canDrag={() => !preview}
+          canDrag={() => !preview && !editing}
+          tool={editing && !preview ? editor.mapTool : null}
           onMoveToken={(token, to) =>
               // the map needs the refusal too, to put the token back
               store.request('token:move', { tokenId: token.id, x: to.x, y: to.y }).then(
@@ -130,7 +139,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
           }}
           tableFrame={preview ? undefined : { onMove: (c) => run(store.request('view:set', c)) }}
           onTapEntrance={
-            preview
+            preview || editing
               ? undefined
               : (e) => {
                   setEntranceId(e.id);
@@ -147,6 +156,10 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
         />
       </div>
       <footer className="game-controls">
+        {editing ? (
+          <MapEditorPanel editor={editor} onDone={() => setEditing(false)} />
+        ) : (
+        <>
         <nav className="tab-bar">
           {PANELS.map((p) => (
             <button key={p.id} className={panel === p.id ? 'on' : ''} onClick={() => setPanel(p.id)} data-testid={`tab-${p.id}`}>
@@ -265,6 +278,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
             selectedEntranceId={entranceId}
             onSelectEntrance={setEntranceId}
             onFocus={(at) => setCamera((c) => ({ ...c, x: at.x, y: at.y }))}
+            onEdit={() => setEditing(true)}
           />
         )}
 
@@ -310,6 +324,8 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
               </li>
             ))}
           </ul>
+        )}
+        </>
         )}
       </footer>
       <RollResult roll={targeting.result} onClose={targeting.clearResult} />

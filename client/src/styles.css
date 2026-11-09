@@ -729,77 +729,141 @@ details.more summary::-webkit-details-marker { display: none; }
 details.more summary::before { content: '▸'; }
 details.more[open] summary::before { content: '▾'; }
 
-/* ---------- Places (generated maps) ---------- */
-:root {
-  --pl-grass: #f3f3f0; --pl-road: #dedcd6; --pl-road-edge: #c4c2bb; --pl-water: #cdd9e0; --pl-bank: #b2c0c9;
-  --pl-building: #c9c9c9; --pl-ink: #3a3a3a; --pl-tree: #dfe3da; --pl-tree-ink: #9da396; --pl-field: #ebebe3;
-  --pl-rock: #b0b0b0; --pl-cave-rock: #4a4a4a; --pl-cave-floor: #efefec; --pl-floor: #f7f6f2; --pl-outside: #e3e3df;
-  --pl-furniture: #d8d6cf; --pl-label: #333333;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --pl-grass: #1d1f1c; --pl-road: #2e2d2a; --pl-road-edge: #3c3b37; --pl-water: #1f2a31; --pl-bank: #2b3840;
-    --pl-building: #4a4a4a; --pl-ink: #cfcfcf; --pl-tree: #263024; --pl-tree-ink: #4c5a47; --pl-field: #232520;
-    --pl-rock: #555555; --pl-cave-rock: #0d0d0d; --pl-cave-floor: #2a2a28; --pl-floor: #2c2b28; --pl-outside: #181816;
-    --pl-furniture: #3e3c37; --pl-label: #e6e6e6;
-  }
-}
-:root[data-theme='dark'] {
-  --pl-grass: #1d1f1c; --pl-road: #2e2d2a; --pl-road-edge: #3c3b37; --pl-water: #1f2a31; --pl-bank: #2b3840;
-  --pl-building: #4a4a4a; --pl-ink: #cfcfcf; --pl-tree: #263024; --pl-tree-ink: #4c5a47; --pl-field: #232520;
-  --pl-rock: #555555; --pl-cave-rock: #0d0d0d; --pl-cave-floor: #2a2a28; --pl-floor: #2c2b28; --pl-outside: #181816;
-  --pl-furniture: #3e3c37; --pl-label: #e6e6e6;
-}
-:root[data-style='parchment'] {
-  --pl-grass: #e6dcb8; --pl-road: #d8c69d; --pl-road-edge: #b39f74; --pl-water: #a9c1bd; --pl-bank: #86a099;
-  --pl-building: #c79f73; --pl-ink: #3b2a1a; --pl-tree: #b3b884; --pl-tree-ink: #6f7448; --pl-field: #ddd0a2;
-  --pl-rock: #a8957a; --pl-cave-rock: #5e4a33; --pl-cave-floor: #efe3c5; --pl-floor: #f1e6c9; --pl-outside: #d9cba5;
-  --pl-furniture: #c4a57c; --pl-label: #3b2a1a;
-}
-@media (prefers-color-scheme: dark) {
-  :root[data-style='parchment']:not([data-theme='light']) {
-    --pl-grass: #2b2720; --pl-road: #3a3226; --pl-road-edge: #4b4031; --pl-water: #26332f; --pl-bank: #34443f;
-    --pl-building: #5b4632; --pl-ink: #e8d9bc; --pl-tree: #343722; --pl-tree-ink: #5d6140; --pl-field: #312c22;
-    --pl-rock: #4a3f31; --pl-cave-rock: #100d0a; --pl-cave-floor: #3a3228; --pl-floor: #3a3228; --pl-outside: #241f19;
-    --pl-furniture: #54452f; --pl-label: #efe4cf;
-  }
-}
-:root[data-style='parchment'][data-theme='dark'] {
-  --pl-grass: #2b2720; --pl-road: #3a3226; --pl-road-edge: #4b4031; --pl-water: #26332f; --pl-bank: #34443f;
-  --pl-building: #5b4632; --pl-ink: #e8d9bc; --pl-tree: #343722; --pl-tree-ink: #5d6140; --pl-field: #312c22;
-  --pl-rock: #4a3f31; --pl-cave-rock: #100d0a; --pl-cave-floor: #3a3228; --pl-floor: #3a3228; --pl-outside: #241f19;
-  --pl-furniture: #54452f; --pl-label: #efe4cf;
-}
+/* ---------- Places (generated maps) ----------
+   Maps are a painted, physical-looking thing: the same colours in every look and theme
+   (the Parchment look lays its paper texture over them). */
+.place path { vector-effect: none; }
 .place polyline, .place line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.place-ground.ground-grass { fill: var(--pl-grass); }
-.place-ground.ground-floor { fill: var(--pl-outside); }
-.place-ground.ground-rock { fill: var(--pl-cave-rock); }
-.place-field { fill: var(--pl-field); stroke: var(--pl-tree-ink); stroke-width: 0.06; stroke-dasharray: 0.5 0.25; }
-.place-water { stroke: var(--pl-water); }
-.place-water-bank { stroke: var(--pl-bank); }
-.place-road { stroke: var(--pl-road); }
-.place-road-edge { stroke: var(--pl-road-edge); }
-.place-square { fill: var(--pl-road); stroke: var(--pl-road-edge); stroke-width: 0.08; }
-.place-bridge { stroke: var(--pl-road); stroke-linecap: butt !important; }
-.place-bridge-edge { stroke: var(--pl-ink); stroke-linecap: butt !important; }
-.place-building { fill: var(--pl-building); stroke: var(--pl-ink); stroke-width: 0.16; stroke-linejoin: round; }
-.place-building.b-inn, .place-building.b-hall, .place-building.b-temple { fill: color-mix(in srgb, var(--pl-building) 80%, var(--pl-ink) 20%); }
-.place-building.ruined { fill: none; stroke-dasharray: 0.6 0.35; }
-.place-tree { fill: var(--pl-tree); stroke: var(--pl-tree-ink); stroke-width: 0.08; }
-.place-rock { fill: var(--pl-rock); stroke: var(--pl-ink); stroke-width: 0.1; stroke-linejoin: round; }
-.place-fence { stroke: var(--pl-ink); stroke-width: 0.08; stroke-dasharray: 0.3 0.2; opacity: 0.7; }
-.place-well { fill: var(--pl-water); stroke: var(--pl-ink); stroke-width: 0.14; }
-.place-floor { fill: var(--pl-floor); }
-.place-cave-floor { fill: var(--pl-cave-floor); fill-rule: evenodd; }
-.place-wall { stroke: var(--pl-ink); stroke-width: 0.3; }
-.place-cave .place-wall { stroke-width: 0.45; }
-.place-furniture { fill: var(--pl-furniture); stroke: var(--pl-ink); stroke-width: 0.06; }
-.place-furniture.f-hearth, .place-furniture.f-forge, .place-furniture.f-oven { fill: color-mix(in srgb, var(--pl-furniture) 60%, var(--range) 40%); }
-.place-furniture.f-altar { fill: color-mix(in srgb, var(--pl-furniture) 70%, var(--spell) 30%); }
-.place-label { fill: var(--pl-label); text-anchor: middle; font-family: var(--font-display); font-weight: 600; paint-order: stroke; stroke: var(--pl-grass); stroke-width: 0.12; }
-.place-label.pl-title { letter-spacing: 0.15em; stroke-width: 0.3; }
-.place-label.pl-room { opacity: 0.55; letter-spacing: 0.08em; stroke: var(--pl-floor); stroke-width: 0.06; }
-.place-label.pl-small { stroke: var(--pl-building); stroke-width: 0.1; }
+
+/* Villages */
+.v-grass { fill: #9cbf84; }
+.v-shading { mix-blend-mode: multiply; opacity: 0.9; }
+.v-contour { fill: none; stroke: #e9f2d6; stroke-width: 0.12; opacity: 0.45; }
+.v-field { stroke: #6f5a43; stroke-width: 0.14; stroke-linejoin: round; }
+.v-field-soil { fill: #a88a73; }
+.v-field-green { fill: #8ea86a; }
+.v-field-gold { fill: #cdb26a; }
+.v-furrows { fill: none; stroke: #5d4836; stroke-width: 0.07; opacity: 0.55; stroke-linecap: round; }
+.v-shore { fill: none; stroke: #e8e2b8; opacity: 0.85; stroke-linecap: round; stroke-linejoin: round; }
+.v-bank { fill: none; stroke: #2c4d5c; stroke-linecap: round; stroke-linejoin: round; }
+.v-water { fill: none; stroke: #4f93a8; stroke-linecap: round; stroke-linejoin: round; }
+.v-water-light { fill: none; stroke: #b9e0e6; stroke-width: 0.14; opacity: 0.7; }
+.v-road-edge { fill: none; stroke: #b9c79a; stroke-linecap: round; stroke-linejoin: round; }
+.v-road { fill: none; stroke: #e6e9cc; stroke-linecap: round; stroke-linejoin: round; }
+.v-square { fill: #eeefd8; stroke: #c7cfa6; stroke-width: 0.2; }
+.v-bridge { fill: #a07a52; stroke: #3c2a1c; stroke-width: 0.14; }
+.v-bridge-planks { fill: none; stroke: #6e5136; stroke-width: 0.06; }
+.v-bridge-rail { fill: none; stroke: #3c2a1c; stroke-width: 0.3; stroke-linecap: round; }
+.v-shadow { fill: #12301d; opacity: 0.28; }
+.v-rock { fill: #a8a395; stroke: #3d3a33; stroke-width: 0.14; stroke-linejoin: round; }
+.v-rock-light { fill: #cbc6b8; opacity: 0.7; }
+.v-tree-outline { fill: none; stroke: #1d3328; stroke-width: 0.36; stroke-linejoin: round; }
+.v-tree { fill: #3f6b52; }
+.v-tree-2 { fill: #4a7a5a; }
+.v-tree-light { fill: #6b9a75; opacity: 0.55; }
+.v-roof { stroke: none; }
+.v-roof-wood.shade-0 { fill: #c08e68; }
+.v-roof-wood.shade-1 { fill: #a5744f; }
+.v-roof-wood.shade-2 { fill: #855a3c; }
+.v-roof-slate.shade-0 { fill: #8b9aa6; }
+.v-roof-slate.shade-1 { fill: #707f8c; }
+.v-roof-slate.shade-2 { fill: #56626d; }
+.v-roof-thatch.shade-0 { fill: #d4b779; }
+.v-roof-thatch.shade-1 { fill: #b99a5c; }
+.v-roof-thatch.shade-2 { fill: #977a43; }
+.v-roof-lines { fill: none; stroke: #3b2a1e; stroke-width: 0.05; opacity: 0.45; }
+.v-ridge { fill: none; stroke: #2e2118; stroke-width: 0.09; stroke-linecap: round; }
+.v-building-outline { fill: none; stroke: #2a1f17; stroke-width: 0.16; stroke-linejoin: round; }
+.v-ruin { fill: #8e8574; fill-opacity: 0.6; stroke: #2a1f17; stroke-width: 0.16; stroke-dasharray: 0.7 0.35; }
+.v-door { fill: #5a3c25; stroke: #2a1f17; stroke-width: 0.05; }
+.v-well { fill: #a8a395; stroke: #2a1f17; stroke-width: 0.12; }
+.v-well-water { fill: #3d6f80; }
+.v-fence { fill: none; stroke: #5b4330; stroke-width: 0.18; stroke-dasharray: 0.35 0.15; stroke-linecap: butt; }
+.v-item-shadow { fill: #000; opacity: 0.2; }
+.ink-thin { stroke: #2a1f17; stroke-width: 0.05; }
+.stripe { stroke: #f4efe2; stroke-width: 0.18; opacity: 0.8; }
+
+/* Interiors, caves and dungeons: ink on paper */
+.i-paper { fill: #ebe7dd; }
+.i-halo { fill: none; stroke: #8c8678; stroke-width: 1.1; opacity: 0.35; stroke-linecap: round; stroke-linejoin: round; }
+.i-hatch { fill: none; stroke: #4a463f; stroke-width: 0.045; opacity: 0.8; stroke-linecap: round; }
+.i-floor { stroke: none; }
+.i-cells { fill-rule: evenodd; }
+.i-wall { fill: none; stroke: #1f1b17; stroke-width: 0.32; stroke-linecap: round; stroke-linejoin: round; }
+.place-cave .i-wall { stroke-width: 0.26; }
+.i-door { fill: #9a6b40; stroke: #1f1b17; stroke-width: 0.07; }
+.i-window { fill: #bfe0ea; stroke: #1f1b17; stroke-width: 0.06; }
+.i-column { fill: #c9c3b6; stroke: #1f1b17; stroke-width: 0.1; }
+.i-column-shadow { fill: #000; opacity: 0.22; }
+.i-puddle { stroke-width: 0.06; }
+.i-puddle-water { fill: #7fa7b8; fill-opacity: 0.55; stroke: #3d6474; }
+.i-puddle-mud { fill: #7d6a4f; fill-opacity: 0.5; stroke: #4d3f2c; }
+.i-puddle-blood { fill: #7a1f1f; fill-opacity: 0.55; stroke: #4a1010; }
+.i-debris { fill: #a39d90; stroke: #3d3a33; stroke-width: 0.04; }
+.i-rock { fill: #9a9486; stroke: #1f1b17; stroke-width: 0.1; stroke-linejoin: round; }
+.i-stairs { fill: #d9d4c8; stroke: #1f1b17; stroke-width: 0.08; }
+.i-stairs-steps { fill: none; stroke: #1f1b17; stroke-width: 0.06; }
+.i-stairs-dark { fill: #000; opacity: 0.18; }
+.i-rug { stroke: #2a1f17; stroke-width: 0.05; }
+.i-rug-border { fill: none; stroke: #e8d9a8; stroke-width: 0.08; opacity: 0.85; }
+.i-rug-border.thin { stroke-width: 0.04; stroke-dasharray: 0.15 0.1; }
+.m-wood { fill: #b98c5e; }
+.m-wood-line { fill: none; stroke: #7a5534; stroke-width: 0.035; }
+.m-wood-grain { fill: none; stroke: #a17447; stroke-width: 0.03; }
+.m-stone { fill: #9b958a; }
+.m-stone-2 { fill: #c4beb2; }
+.m-stone-3 { fill: #b8b1a4; }
+.m-flag { fill: #ece9e2; }
+.m-flag-2 { fill: #e4e0d7; }
+.m-flag-3 { fill: #e8e4dc; }
+.m-flag-line { fill: none; stroke: #b8b2a6; stroke-width: 0.035; stroke-dasharray: 0.16 0.1; }
+.m-tile { fill: #d8cfbd; }
+.m-tile-2 { fill: #b9ab93; }
+.m-earth { fill: #a99073; }
+.m-earth-dot { fill: none; stroke: #7b6650; stroke-width: 0.08; stroke-linecap: round; }
+.m-cave { fill: #cfc7b6; }
+.m-cave-line { fill: none; stroke: #a69d8a; stroke-width: 0.05; stroke-linecap: round; }
+.fu rect, .fu ellipse, .fu circle, .fu path { stroke-linejoin: round; }
+.fu-wood { fill: #9b6a3f; stroke: #2a1f17; stroke-width: 0.06; }
+.fu-wood-dark { fill: #6f4a2b; stroke: #2a1f17; stroke-width: 0.06; }
+.fu-gold-wood { fill: #b58b3a; stroke: #2a1f17; stroke-width: 0.06; }
+.fu-grain { stroke: #7b5231; stroke-width: 0.03; }
+.fu-grain-box { fill: none; stroke: #7b5a33; stroke-width: 0.05; }
+.fu-ink { fill: none; stroke: #2a1f17; stroke-width: 0.05; }
+.fu-paper { fill: #f1ead8; stroke: #8a7f6a; stroke-width: 0.02; }
+.fu-candle { fill: #f5d76e; stroke: #8a6a1f; stroke-width: 0.03; }
+.fu-mug { fill: #c9c1b0; stroke: #2a1f17; stroke-width: 0.03; }
+.fu-metal { fill: #8a8a8a; stroke: #2a1f17; stroke-width: 0.03; }
+.fu-pillow { fill: #f1ede2; stroke: #2a1f17; stroke-width: 0.04; }
+.fu-fold { stroke: #000; stroke-width: 0.04; opacity: 0.3; }
+.fu-chest { fill: #7d5130; stroke: #2a1f17; stroke-width: 0.06; }
+.fu-band { stroke: #3a3530; stroke-width: 0.08; }
+.fu-gold { fill: #d9b44a; stroke: #2a1f17; stroke-width: 0.02; }
+.fu-barrel { fill: #94653b; stroke: #2a1f17; stroke-width: 0.06; }
+.fu-hoop { fill: none; stroke: #3a3530; stroke-width: 0.05; }
+.fu-urn { fill: #b0603a; stroke: #2a1f17; stroke-width: 0.05; }
+.fu-dark { fill: #2a1f17; }
+.fu-crate { fill: #b48a52; stroke: #2a1f17; stroke-width: 0.06; }
+.fu-sack { fill: #cdb98d; stroke: #2a1f17; stroke-width: 0.05; }
+.fu-stone { fill: #8f897d; stroke: #1f1b17; stroke-width: 0.07; }
+.fu-stone-light { fill: #cfc9bc; stroke: #1f1b17; stroke-width: 0.07; }
+.fu-coals { fill: #3a2a22; }
+.fu-fire { fill: #e8812a; opacity: 0.9; }
+.fu-fire-core { fill: #f7d35a; }
+.fu-iron { fill: #4d4d4f; stroke: #111; stroke-width: 0.05; }
+.fu-cloth { fill: #7a2f4a; stroke: #2a1f17; stroke-width: 0.03; }
+.fu-hay { fill: #d6b860; stroke: #7a6526; stroke-width: 0.05; }
+.fu-hay-line { stroke: #9a7f30; stroke-width: 0.04; }
+.fu-straw { fill: #d9c27a; fill-opacity: 0.55; }
+.fu-fence { fill: none; stroke: #5b4330; stroke-width: 0.12; }
+.fu-shadow { fill: #000; opacity: 0.2; }
+.fu-carving { fill: none; stroke: #6f695e; stroke-width: 0.05; }
+.fu-bones line { stroke: #efe8d6; stroke-width: 0.1; stroke-linecap: round; }
+.fu-rubble path { fill: #a39d90; stroke: #3d3a33; stroke-width: 0.04; }
+.place-label { fill: #2a1f17; text-anchor: middle; font-family: var(--font-display); font-weight: 700; paint-order: stroke; stroke: rgb(255 255 255 / 0.7); stroke-width: 0.12; }
+.place-label.pl-title { letter-spacing: 0.15em; stroke-width: 0.35; font-family: Cinzel, Georgia, serif; }
+.place-label.pl-room { fill: #6b6458; stroke: #ebe7dd; stroke-width: 0.06; letter-spacing: 0.08em; }
+.place-label.pl-small { fill: #fff8e8; stroke: #2a1f17; stroke-width: 0.12; font-weight: 600; }
 .entrance .entrance-dot { fill: var(--bg); stroke: var(--path); stroke-width: 0.1; }
 .entrance.selected .entrance-dot { fill: var(--path); }
 .entrance.selected .entrance-icon { fill: #fff; }
@@ -814,3 +878,12 @@ details.more[open] summary::before { content: '▾'; }
 .encounter-mark { pointer-events: none; }
 .preview-banner { position: absolute; top: 8px; left: 50%; translate: -50% 0; z-index: 2; background: var(--path); color: #fff; padding: 6px 14px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; pointer-events: none; white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; }
 .entrance-bar { display: flex; align-items: center; gap: 10px; }
+.map-board.editing .token, .map-board.editing .entrances, .map-board.editing .table-frame, .map-board.editing .table-frame * { pointer-events: none; }
+.map-board.editing .token { opacity: 0.45; }
+.edit-outline { fill: none; stroke: var(--path); stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; stroke-width: 2px; }
+.edit-handle { fill: #fff; stroke: var(--path); vector-effect: non-scaling-stroke; stroke-width: 2px; }
+.edit-draft { fill: var(--path); fill-opacity: 0.15; stroke: var(--path); vector-effect: non-scaling-stroke; stroke-width: 2px; }
+.edit-line { stroke: var(--path); vector-effect: non-scaling-stroke; stroke-width: 3px; stroke-linecap: round; }
+.tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.tool-grid .button.on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.check-row { justify-content: flex-start; gap: 8px; } .check-row input { width: auto; margin: 0; }

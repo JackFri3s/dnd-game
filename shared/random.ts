@@ -34,6 +34,43 @@ export function makeRng(seed: number): Rng {
   return next;
 }
 
+/**
+ * Smooth 2D value noise in [0, 1] (a few octaves), the same everywhere for a seed.
+ * `scale` is the size of the biggest features, in map units.
+ */
+export function makeNoise(seed: number) {
+  const hash = (x: number, y: number) => {
+    let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 982451653)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+  const smooth = (t: number) => t * t * (3 - 2 * t);
+  const value = (x: number, y: number) => {
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const fx = smooth(x - ix);
+    const fy = smooth(y - iy);
+    const a = hash(ix, iy);
+    const b = hash(ix + 1, iy);
+    const c = hash(ix, iy + 1);
+    const d = hash(ix + 1, iy + 1);
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+  };
+  return (x: number, y: number, scale = 20) => {
+    let sum = 0;
+    let amp = 1;
+    let norm = 0;
+    for (let o = 0; o < 3; o++) {
+      const f = 2 ** o / scale;
+      sum += value(x * f + o * 17.3, y * f - o * 9.1) * amp;
+      norm += amp;
+      amp *= 0.5;
+    }
+    return sum / norm;
+  };
+}
+
 export const newSeed = () => Math.floor(Math.random() * 2 ** 31);
 
 // ---------------------------------------------------------------------------

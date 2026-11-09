@@ -1035,7 +1035,7 @@ export class GameRoom extends DurableObject<Env> {
           entrance.targetId = id;
           this.touchPlace(room, here.id);
         } else {
-          const kind: PlaceKind = (['village', 'building', 'cave', 'blank'] as const).find((k) => k === msg.kind) ?? 'blank';
+          const kind: PlaceKind = (['village', 'building', 'cave', 'dungeon', 'blank'] as const).find((k) => k === msg.kind) ?? 'blank';
           const building = BUILDING_KINDS.find((b) => b === msg.building) ?? 'house';
           place = { ...generatePlace(kind, seed, context, name || undefined, building), id, parentId: null, parentEntranceId: null };
         }
@@ -1104,6 +1104,39 @@ export class GameRoom extends DurableObject<Env> {
           if (msg.entrance.name !== undefined) e.name = cleanTitle(msg.entrance.name) || e.name;
           if (msg.entrance.hidden !== undefined) e.hidden = !!msg.entrance.hidden || undefined;
         }
+        this.touchPlace(room, place.id);
+        return this.commit(room);
+      }
+
+      case 'place:map': {
+        requireRole(me, 'dm');
+        const place = room.places[msg.placeId];
+        if (!place) throw new GameError('Place not found.');
+        const bound = { w: place.size.w, h: place.size.h };
+        place.features = sanitizeFeatures(msg.features, bound);
+        place.walls = (Array.isArray(msg.walls) ? msg.walls : []).slice(0, 12000).flatMap((w) =>
+          Array.isArray(w) && w.length === 4 && w.every((n) => Number.isFinite(n)) ? [w.map((n, i) => Math.round(clampTo(n, i % 2 ? bound.h : bound.w) * 100) / 100)] : [],
+        );
+        // Entrances keep where they lead to; new ones lead nowhere yet.
+        const before = new Map(place.entrances.map((e) => [e.id, e]));
+        const seen = new Set<string>();
+        place.entrances = (Array.isArray(msg.entrances) ? msg.entrances : []).slice(0, 400).flatMap((e) => {
+          if (!e || typeof e.id !== 'string' || seen.has(e.id) || !['building', 'cave', 'deeper', 'exit'].includes(e.kind)) return [];
+          seen.add(e.id);
+          const old = before.get(e.id);
+          return [
+            {
+              id: e.id.slice(0, 40),
+              name: cleanTitle(e.name) || 'Door',
+              kind: e.kind,
+              ...(e.kind === 'building' ? { building: BUILDING_KINDS.find((b) => b === e.building) ?? 'house' } : {}),
+              x: clampTo(num(e.x, -1e6, 1e6), bound.w),
+              y: clampTo(num(e.y, -1e6, 1e6), bound.h),
+              targetId: old?.targetId ?? (e.kind === 'exit' ? place.parentId : null),
+              ...(e.hidden ? { hidden: true } : {}),
+            },
+          ];
+        });
         this.touchPlace(room, place.id);
         return this.commit(room);
       }
@@ -1506,6 +1539,87 @@ function sanitizeNpcs(raw: unknown): Npc[] {
     secret: str(n?.secret, 300),
     ...(typeof n?.entranceId === 'string' ? { entranceId: n.entranceId.slice(0, 40) } : {}),
   }));
+}
+
+const clampTo = (n: number, max: number) => Math.min(max + 5, Math.max(-5, n));
+
+/** A hand-edited map from the DM: only well-formed features, with sensible numbers. */
+function sanitizeFeatures(raw: unknown, bound: { w: number; h: number }): StoredPlace['features'] {
+  const list = Array.isArray(raw) ? raw.slice(0, 12000) : [];
+  const n = (v: unknown, max: number) => {
+    const x = Number(v);
+    if (!Number.isFinite(x)) throw new GameError('The map has a broken number in it.');
+    return Math.round(clampTo(x, max) * 100) / 100;
+  };
+  const size = (v: unknown) => Math.round(num(v, 0.05, 200) * 100) / 100;
+  const angle = (v: unknown) => Math.round(num(v ?? 0, -100, 100) * 1000) / 1000;
+  const pt = (p: { x: unknown; y: unknown }) => ({ x: n(p?.x, bound.w), y: n(p?.y, bound.h) });
+  const pts = (v: unknown, min: number) => {
+    if (!Array.isArray(v) || v.length < min || v.length > 4000) throw new GameError('The map has a broken shape in it.');
+    return v.map(pt);
+  };
+  const color = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : '#888888');
+  const text = (v: unknown, max = 60) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const one = <T,>(v: unknown, options: readonly T[], fallback: T) => options.find((o) => o === v) ?? fallback;
+  const out: StoredPlace['features'] = [];
+  for (const f of list as Record<string, unknown>[]) {
+    if (!f || typeof f !== 'object') continue;
+    switch (f.t) {
+      case 'road':
+      case 'water':
+      case 'fence':
+        out.push({ t: f.t, pts: pts(f.pts, 2), ...(f.t === 'fence' ? {} : { w: size(f.w) }) } as StoredPlace['features'][number]);
+        break;
+      case 'square':
+      case 'rock':
+        out.push({ t: f.t, poly: pts(f.poly, 3) });
+        break;
+      case 'field':
+        out.push({ t: 'field', poly: pts(f.poly, 3), a: angle(f.a), crop: one(f.crop, ['soil', 'green', 'gold'] as const, 'soil') });
+        break;
+      case 'puddle':
+        out.push({ t: 'puddle', poly: pts(f.poly, 3), kind: one(f.kind, ['water', 'mud', 'blood'] as const, 'water') });
+        break;
+      case 'floor':
+        out.push({ t: 'floor', poly: pts(f.poly, 3), ...(f.room ? { room: text(f.room) } : {}), material: one(f.material, ['wood', 'stone', 'flag', 'earth', 'tile', 'cave'] as const, 'wood') });
+        break;
+      case 'building':
+        out.push({ t: 'building', poly: pts(f.poly, 3), type: one(f.type, BUILDING_KINDS, 'house'), roof: one(f.roof, ['wood', 'slate', 'thatch'] as const, 'wood'), ...(f.ruined ? { ruined: true } : {}), ...(f.label ? { label: text(f.label) } : {}) });
+        break;
+      case 'bridge':
+        out.push({ t: 'bridge', a: pt(f.a as Point), b: pt(f.b as Point), w: size(f.w) });
+        break;
+      case 'tree':
+      case 'column':
+      case 'debris':
+        out.push({ t: f.t, x: n(f.x, bound.w), y: n(f.y, bound.h), r: size(f.r), ...(f.t === 'column' && f.round ? { round: true } : {}) } as StoredPlace['features'][number]);
+        break;
+      case 'well':
+        out.push({ t: 'well', x: n(f.x, bound.w), y: n(f.y, bound.h) });
+        break;
+      case 'stall':
+      case 'rug':
+        out.push({ t: f.t, x: n(f.x, bound.w), y: n(f.y, bound.h), w: size(f.w), h: size(f.h), a: angle(f.a), color: color(f.color) });
+        break;
+      case 'furniture':
+        out.push({ t: 'furniture', kind: text(f.kind, 30) || 'table', x: n(f.x, bound.w), y: n(f.y, bound.h), w: size(f.w), h: size(f.h), a: angle(f.a) });
+        break;
+      case 'stairs':
+        out.push({ t: 'stairs', x: n(f.x, bound.w), y: n(f.y, bound.h), w: size(f.w), h: size(f.h), a: angle(f.a) });
+        break;
+      case 'door':
+      case 'window':
+        out.push({ t: f.t, x: n(f.x, bound.w), y: n(f.y, bound.h), a: angle(f.a), w: size(f.w) });
+        break;
+      case 'cells':
+        if (typeof f.d === 'string' && f.d.length < 400000 && /^[MLZHVQAmlzhvqa0-9.,\- ]*$/.test(f.d)) out.push({ t: 'cells', d: f.d, material: one(f.material, ['wood', 'stone', 'flag', 'earth', 'tile', 'cave'] as const, 'cave') });
+        break;
+      case 'label':
+        out.push({ t: 'label', x: n(f.x, bound.w), y: n(f.y, bound.h), text: text(f.text) });
+        break;
+    }
+  }
+  return out;
 }
 
 /** Generated maps have long decimals; two places are plenty (and keep saves small). */

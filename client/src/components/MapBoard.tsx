@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SEATS, type Area, type Highlight, type RoomState, type Token } from '../../../shared/protocol.ts';
 import {
   MIN_TOKEN_GAP,
@@ -21,6 +21,16 @@ export interface Camera {
   x: number; // centre of the view, in map units (1 unit = 5 ft)
   y: number;
   scale: number; // screen pixels per map unit
+}
+
+/** A map tool that takes presses on the map (the DM's map editor). */
+export interface MapTool {
+  /** A press on the map: return true to take it (the map then doesn't pan). */
+  down(at: Point): boolean;
+  move(at: Point): void;
+  up(at: Point): void;
+  /** Drawn over the map (handles, the shape being drawn). `px` is one screen pixel in map units. */
+  overlay?: (px: number) => ReactNode;
 }
 
 /** An area being aimed (not placed yet), drawn dashed. */
@@ -54,6 +64,8 @@ interface Props {
   /** Tapping a door, cave mouth or stairs. */
   onTapEntrance?: (entrance: Entrance) => void;
   selectedEntranceId?: string | null;
+  /** The DM's map editor: takes presses, tokens can't be dragged meanwhile. */
+  tool?: MapTool | null;
 }
 
 const MIN_SCALE = 8;
@@ -86,7 +98,9 @@ export function MapBoard({
   localHighlight,
   onTapEntrance,
   selectedEntranceId,
+  tool,
 }: Props) {
+  const toolPointer = useRef<number | null>(null);
   const { unit } = useSettings();
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -163,6 +177,11 @@ export function MapBoard({
 
   // ---- panning & zooming (phones and DM) ----
   function onBackgroundPointerDown(e: React.PointerEvent) {
+    if (tool && pointers.current.size === 0 && tool.down(toMap(e.clientX, e.clientY))) {
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      toolPointer.current = e.pointerId;
+      return;
+    }
     if (!onCameraChange) {
       if (onTapMap) onTapMap(toMap(e.clientX, e.clientY));
       else onSelectToken?.(null);
@@ -176,6 +195,10 @@ export function MapBoard({
     }
   }
   function onBackgroundPointerMove(e: React.PointerEvent) {
+    if (toolPointer.current === e.pointerId) {
+      tool?.move(toMap(e.clientX, e.clientY));
+      return;
+    }
     const prev = pointers.current.get(e.pointerId);
     if (!prev || !onCameraChange) return;
     const now = { x: e.clientX, y: e.clientY };
@@ -189,6 +212,11 @@ export function MapBoard({
     }
   }
   function onBackgroundPointerUp(e: React.PointerEvent) {
+    if (toolPointer.current === e.pointerId) {
+      toolPointer.current = null;
+      tool?.up(toMap(e.clientX, e.clientY));
+      return;
+    }
     const start = pointers.current.get(e.pointerId);
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
@@ -256,7 +284,7 @@ export function MapBoard({
   return (
     <svg
       ref={svgRef}
-      className={`map-board ${onTapMap ? 'aiming' : ''}`}
+      className={`map-board ${onTapMap ? 'aiming' : ''} ${tool ? 'editing' : ''}`}
       onPointerDown={onBackgroundPointerDown}
       onPointerMove={onBackgroundPointerMove}
       onPointerUp={onBackgroundPointerUp}
@@ -369,6 +397,7 @@ export function MapBoard({
             </text>
           </g>
         )}
+        {tool?.overlay?.(px)}
         {tableArea && (
           <g
             className="table-frame"
