@@ -33,9 +33,9 @@ function fixText(s) {
     .replaceAll('â€”', '—');
 }
 
-const [classes, levels, species, subspecies, backgrounds, feats, skills, spells, equipment, traits, features, languages, alignments] =
+const [classes, levels, species, subspecies, backgrounds, feats, skills, spells, equipment, traits, features, languages, alignments, conditions, monsters] =
   await Promise.all(
-    ['Classes', 'Levels', 'Species', 'Subspecies', 'Backgrounds', 'Feats', 'Skills', 'Spells', 'Equipment', 'Traits', 'Features', 'Languages', 'Alignments'].map(load),
+    ['Classes', 'Levels', 'Species', 'Subspecies', 'Backgrounds', 'Feats', 'Skills', 'Spells', 'Equipment', 'Traits', 'Features', 'Languages', 'Alignments', 'Conditions', 'Monsters'].map(load),
   );
 
 const skillIndex = (profIndex) => profIndex.replace(/^skill-/, '');
@@ -230,9 +230,66 @@ const data = {
     if (e.weight) item.weight = e.weight;
     return item;
   }),
+  conditions: conditions.map((c) => ({ index: c.index, name: c.name, description: (c.description ?? (c.desc ?? []).join('\n')) || '' })),
   languages: languages.map((l) => l.name),
   alignments: alignments.filter((a) => a.index !== 'unaligned').map((a) => a.name),
 };
+
+// ---- monsters (a separate file: only the DM needs them) ----
+const ABIL = { strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha' };
+const feet = (v) => Number(String(v ?? '').match(/\d+/)?.[0] ?? 0);
+function monsterAction(a) {
+  const desc = a.desc ?? a.description ?? '';
+  const out = { name: a.name, desc };
+  if (typeof a.attack_bonus === 'number') out.attack = a.attack_bonus;
+  const dmg = (a.damage ?? []).filter((d) => d.damage_dice).map((d) => ({ dice: d.damage_dice.replace(/\s/g, ''), type: d.damage_type?.name ?? '' }));
+  // Extra damage that only applies sometimes ("... damage if the attack roll had Advantage").
+  if (dmg.length > 1 && /damage if /i.test(desc)) dmg.slice(1).forEach((d) => (d.conditional = true));
+  if (dmg.length) out.damage = dmg;
+  const dc = desc.match(/(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) Saving Throw: DC (\d+)/);
+  if (dc) out.dc = { ability: ABIL[dc[1].toLowerCase()], value: Number(dc[2]) };
+  const reach = desc.match(/reach (\d+) ft/);
+  const range = desc.match(/range (\d+)(?:\/(\d+))? ft/);
+  if (reach) out.reach = Number(reach[1]);
+  if (range) out.range = { normal: Number(range[1]), ...(range[2] ? { long: Number(range[2]) } : {}) };
+  return out;
+}
+const monsterData = monsters.map((m) => {
+  const saves = Object.fromEntries(
+    (m.proficiencies ?? []).filter((p) => p.proficiency.index.startsWith('saving-throw-')).map((p) => [p.proficiency.index.replace('saving-throw-', ''), p.value]),
+  );
+  const skills = (m.proficiencies ?? []).filter((p) => p.proficiency.index.startsWith('skill-')).map((p) => `${p.proficiency.name.replace('Skill: ', '')} +${p.value}`);
+  return {
+    index: m.index,
+    name: m.name,
+    size: m.size,
+    type: m.type,
+    alignment: m.alignment,
+    cr: m.challenge_rating,
+    xp: m.xp,
+    ac: m.armor_class?.[0]?.value ?? 10,
+    hp: m.hit_points,
+    hitDice: m.hit_points_roll ?? m.hit_dice,
+    speed: Object.fromEntries(Object.entries(m.speed ?? {}).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, feet(v)])),
+    abilities: { str: m.strength, dex: m.dexterity, con: m.constitution, int: m.intelligence, wis: m.wisdom, cha: m.charisma },
+    saves,
+    skills,
+    senses: Object.entries(m.senses ?? {}).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`).join(', '),
+    languages: m.languages ?? '',
+    resistances: (m.damage_resistances ?? []).map(String),
+    immunities: (m.damage_immunities ?? []).map(String),
+    vulnerabilities: (m.damage_vulnerabilities ?? []).map(String),
+    conditionImmunities: (m.condition_immunities ?? []).map((c) => c.name ?? String(c)),
+    traits: (m.special_abilities ?? []).map((a) => ({ name: a.name, desc: a.desc ?? '' })),
+    actions: (m.actions ?? []).map(monsterAction),
+    bonusActions: (m.bonus_actions ?? []).map(monsterAction),
+    reactions: (m.reactions ?? []).map((a) => ({ name: a.name, desc: a.desc ?? '' })),
+    legendary: (m.legendary_actions ?? []).map((a) => ({ name: a.name, desc: a.desc ?? '' })),
+  };
+});
+const MONSTERS_OUT = new URL('../client/src/rules/monsters-2024.json', import.meta.url);
+await writeFile(MONSTERS_OUT, JSON.stringify({ source: data.source, monsters: monsterData }));
+console.log(`Wrote ${MONSTERS_OUT.pathname} (${(JSON.stringify(monsterData).length / 1024).toFixed(0)} KB): ${monsterData.length} monsters`);
 
 await mkdir(new URL('.', OUT), { recursive: true });
 await writeFile(OUT, JSON.stringify(data));

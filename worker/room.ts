@@ -23,6 +23,9 @@ import {
   type Character,
   type DiceRoll,
   type Area,
+  type Combat,
+  type RollOutcome,
+  type TokenStats,
 } from '../shared/protocol.ts';
 import type { CampaignExport } from './campaign.ts';
 import { checkHomebrew, emptyHomebrew, DAMAGE_TYPES, WEAPON_PROPERTIES, SCHOOLS, type Homebrew, type HomebrewKind } from '../shared/homebrew.ts';
@@ -50,6 +53,7 @@ interface StoredRoom {
   rolls: DiceRoll[];
   areas: Area[];
   homebrew: Homebrew;
+  combat: Combat | null;
 }
 
 const KEY_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -57,7 +61,7 @@ const KEY_LENGTH = 10;
 
 function emptyWorld(): World {
   const board = DEFAULT_BOARD;
-  return { board, tokens: {}, view: { x: board.w / 2, y: board.h / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [], homebrew: emptyHomebrew() };
+  return { board, tokens: {}, view: { x: board.w / 2, y: board.h / 2 }, highlight: null, nextTokenId: 1, characters: {}, areas: [], homebrew: emptyHomebrew(), combat: null };
 }
 
 /**
@@ -97,6 +101,7 @@ function worldOf(room: StoredRoom): World {
     characters: room.characters,
     areas: room.areas,
     homebrew: room.homebrew,
+    combat: room.combat,
   };
 }
 
@@ -110,6 +115,7 @@ function applyWorld(room: StoredRoom, world: World) {
   room.characters = world.characters ?? {};
   room.areas = world.areas ?? [];
   room.homebrew = { ...emptyHomebrew(), ...(world.homebrew ?? {}) };
+  room.combat = world.combat ?? null;
 }
 
 const DEFAULT_BOARD = { w: 40, h: 25 };
@@ -128,6 +134,7 @@ function withDefaults(room: Partial<StoredRoom> & Pick<StoredRoom, 'code' | 'tab
     characters: {},
     rolls: [],
     areas: [],
+    combat: null,
     ...room,
     homebrew: { ...emptyHomebrew(), ...(room.homebrew ?? {}) },
     board,
@@ -340,6 +347,20 @@ export class GameRoom extends DurableObject<Env> {
         const spot = clampToBoard(to, room.board);
         const blocker = Object.values(room.tokens).find((t) => t.id !== token.id && dist(t, spot) < MIN_TOKEN_GAP);
         if (blocker) throw new GameError(`${blocker.name} is in the way.`);
+        // In combat, movement is counted per turn; players may only move on their own turn.
+        const combat = room.combat;
+        if (combat && combat.round > 0) {
+          const current = combat.order[combat.turn]?.tokenId;
+          if (me.role === 'player' && current !== token.id) throw new GameError("It's not your turn.");
+          if (current === token.id) {
+            const moved = (combat.moved[token.id] ?? 0) + dist(token, spot) * 5;
+            const limit = speedOf(room, token) * (combat.used[token.id]?.dash ? 2 : 1);
+            if (me.role === 'player' && moved > limit + 0.5) {
+              throw new GameError(`Only ${Math.max(0, Math.floor(limit - (combat.moved[token.id] ?? 0)))} ft of movement left this turn.`);
+            }
+            combat.moved[token.id] = moved;
+          }
+        }
         token.x = spot.x;
         token.y = spot.y;
         return this.commit(room);
@@ -358,6 +379,8 @@ export class GameRoom extends DurableObject<Env> {
           ownerId: null,
           ...hex,
         });
+        if (msg.stats) token.stats = sanitizeStats(msg.stats);
+        if (msg.speedFt !== undefined) token.speedFt = num(msg.speedFt, 0, 300);
         this.commit(room);
         return { tokenId: token.id };
       }
@@ -368,6 +391,7 @@ export class GameRoom extends DurableObject<Env> {
         if (!token) throw new GameError('Token not found.');
         delete room.tokens[token.id];
         if (room.highlight?.tokenId === token.id) room.highlight = null;
+        if (room.combat) removeFromCombat(room.combat, token.id);
         return this.commit(room);
       }
 
@@ -457,6 +481,174 @@ export class GameRoom extends DurableObject<Env> {
         } else if (token) token.ownerId = null;
         else if (target && room.phase === 'playing') syncCharacterToken(room, c);
         return this.commit(room);
+      }
+
+      // ---------- hit points and conditions ----------
+
+      case 'token:hp': {
+        const token = room.tokens[msg.tokenId];
+        if (!token) throw new GameError('Token not found.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
+        const change = Math.round(num(msg.change, -9999, 9999));
+        if (change < 0) applyDamage(room, token, -change, '');
+        else if (change > 0) heal(room, token, change);
+        if (msg.temp !== undefined) {
+          const hp = hpOf(room, token);
+          if (hp) hp.temp = Math.max(hp.temp, Math.round(num(msg.temp, 0, 999)));
+        }
+        return this.commit(room);
+      }
+
+      case 'token:conditions': {
+        const token = room.tokens[msg.tokenId];
+        if (!token) throw new GameError('Token not found.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
+        token.conditions = (Array.isArray(msg.conditions) ? msg.conditions : []).filter((c) => typeof c === 'string').slice(0, 20).map((c) => c.slice(0, 30));
+        return this.commit(room);
+      }
+
+      // ---------- combat ----------
+
+      case 'combat:start': {
+        requireRole(me, 'dm');
+        const ids = (Array.isArray(msg.tokenIds) ? msg.tokenIds : []).filter((id) => room.tokens[id]);
+        if (!ids.length) throw new GameError('Choose who is in the fight.');
+        room.combat = { round: 0, turn: 0, order: ids.map((tokenId) => ({ tokenId, init: null })), moved: {}, used: {} };
+        // Monsters and NPCs roll straight away; players roll on their phones.
+        for (const entry of room.combat.order) {
+          const t = room.tokens[entry.tokenId];
+          if (t.kind !== 'player') this.recordRoll(room, rollInitiative(room, t, me!), entry);
+        }
+        return this.commit(room);
+      }
+
+      case 'combat:initiative': {
+        const combat = room.combat;
+        const entry = combat?.order.find((e) => e.tokenId === msg.tokenId);
+        const token = room.tokens[msg.tokenId];
+        if (!combat || !entry || !token) throw new GameError('Not in this fight.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
+        if (msg.value !== undefined) entry.init = Math.round(num(msg.value, -10, 50));
+        else this.recordRoll(room, rollInitiative(room, token, me!), entry);
+        if (combat.round > 0) sortOrder(room, combat);
+        await this.commit(room);
+        return { init: entry.init! } satisfies Requests['combat:initiative']['result'];
+      }
+
+      case 'combat:begin': {
+        requireRole(me, 'dm');
+        const combat = room.combat;
+        if (!combat) throw new GameError('No fight to begin.');
+        for (const entry of combat.order) {
+          if (entry.init === null) this.recordRoll(room, rollInitiative(room, room.tokens[entry.tokenId], me!), entry);
+        }
+        sortOrder(room, combat);
+        Object.assign(combat, { round: 1, turn: 0, moved: {}, used: {} });
+        return this.commit(room);
+      }
+
+      case 'combat:next': {
+        const combat = room.combat;
+        if (!combat || combat.round === 0) throw new GameError('The fight has not begun.');
+        const current = room.tokens[combat.order[combat.turn]?.tokenId];
+        if (me?.role !== 'dm' && !(me?.role === 'player' && current?.ownerId === me.id)) throw new GameError("It's not your turn.");
+        // Next in line; defeated monsters and NPCs are skipped (players at 0 HP still roll death saves).
+        for (let i = 0; i < combat.order.length; i++) {
+          combat.turn += 1;
+          if (combat.turn >= combat.order.length) {
+            combat.turn = 0;
+            combat.round += 1;
+          }
+          const t = room.tokens[combat.order[combat.turn].tokenId];
+          if (t && !(t.kind !== 'player' && (t.conditions ?? []).includes('unconscious'))) break;
+        }
+        const next = combat.order[combat.turn]?.tokenId;
+        if (next) {
+          delete combat.moved[next];
+          delete combat.used[next];
+        }
+        return this.commit(room);
+      }
+
+      case 'combat:end': {
+        requireRole(me, 'dm');
+        room.combat = null;
+        return this.commit(room);
+      }
+
+      case 'combat:use': {
+        const combat = room.combat;
+        const token = room.tokens[msg.tokenId];
+        if (!combat || !token) throw new GameError('Not in a fight.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && token.ownerId === me.id)) throw new GameError('Not allowed.');
+        if (!['action', 'bonus', 'reaction', 'dash'].includes(msg.what)) throw new GameError('Unknown.');
+        combat.used[token.id] = { ...(combat.used[token.id] ?? {}), [msg.what]: !!msg.value };
+        return this.commit(room);
+      }
+
+      case 'combat:attack': {
+        const attacker = room.tokens[msg.attackerId];
+        const target = room.tokens[msg.targetId];
+        if (!attacker || !target) throw new GameError('Token not found.');
+        if (me?.role !== 'dm' && !(me?.role === 'player' && attacker.ownerId === me.id)) throw new GameError('You can only attack with your own character.');
+        const toHit = Math.round(num(msg.toHit, -10, 40));
+        const d20 = randomInt(20);
+        const ac = acOf(room, target);
+        const crit = d20 === 20;
+        const hit = crit || (d20 !== 1 && d20 + toHit >= ac);
+        const outcome: RollOutcome = { target: target.name, result: crit ? 'crit' : hit ? 'hit' : 'miss', damage: 0 };
+        const groups = [{ sides: 20, rolls: [d20], kept: [d20], total: d20 }];
+        if (hit) {
+          const parts = [
+            { dice: diceList(msg.damage), bonus: Math.round(num(msg.damageBonus, -20, 50)), type: String(msg.damageType ?? '') },
+            ...(Array.isArray(msg.extra) ? msg.extra.slice(0, 4) : []).map((x) => ({ dice: diceList([x]), bonus: 0, type: String(x?.type ?? '') })),
+          ];
+          const notes: string[] = [];
+          for (const p of parts) {
+            const rolls = p.dice.flatMap((g) => Array.from({ length: g.count * (crit ? 2 : 1) }, () => randomInt(g.sides)));
+            const amount = Math.max(0, rolls.reduce((a, b) => a + b, 0) + p.bonus);
+            const dealt = applyDamage(room, target, amount, p.type);
+            outcome.damage += dealt.dealt;
+            if (dealt.note) notes.push(dealt.note);
+          }
+          if (notes.length) outcome.note = [...new Set(notes)].join(', ');
+        }
+        const roll = this.recordRoll(room, {
+          id: crypto.randomUUID(), byId: me!.id, byName: attacker.name,
+          label: `${attacker.name} → ${target.name}: ${cleanTitle(msg.label) || 'attack'} (AC ${ac})`,
+          groups, modifier: toHit, total: d20 + toHit, at: Date.now(), outcomes: [outcome],
+        });
+        await this.commit(room);
+        return { roll } satisfies Requests['combat:attack']['result'];
+      }
+
+      case 'combat:save': {
+        if (!me || me.role === 'table') throw new GameError('Not allowed.');
+        const attacker = msg.attackerId ? room.tokens[msg.attackerId] : null;
+        if (me.role === 'player' && attacker?.ownerId !== me.id) throw new GameError('You can only do this for your own character.');
+        const ability = (ABILITY_KEYS as readonly string[]).includes(msg.ability) ? msg.ability : 'dex';
+        const dc = Math.round(num(msg.dc, 1, 40));
+        const dice = diceList(msg.damage);
+        const damageRolls = dice.flatMap((g) => Array.from({ length: g.count }, () => randomInt(g.sides)));
+        const total = Math.max(0, damageRolls.reduce((a, b) => a + b, 0) + Math.round(num(msg.damageBonus, -20, 50)));
+        const outcomes: RollOutcome[] = [];
+        for (const id of (Array.isArray(msg.targetIds) ? msg.targetIds : []).slice(0, 30)) {
+          const target = room.tokens[id];
+          if (!target) continue;
+          const roll = randomInt(20) + saveOf(room, target, ability);
+          const saved = roll >= dc;
+          const amount = saved ? (msg.half ? Math.floor(total / 2) : 0) : total;
+          const dealt = amount > 0 ? applyDamage(room, target, amount, String(msg.damageType ?? '')) : { dealt: 0, note: '' };
+          outcomes.push({ target: target.name, result: saved ? 'saved' : 'failed', damage: dealt.dealt, note: [`rolled ${roll}`, dealt.note].filter(Boolean).join(', ') });
+        }
+        const rollRecord = this.recordRoll(room, {
+          id: crypto.randomUUID(), byId: me.id, byName: attacker?.name ?? me.name,
+          label: `${attacker ? `${attacker.name}: ` : ''}${cleanTitle(msg.label) || 'Saving throw'} (DC ${dc} ${ability.toUpperCase()})`,
+          groups: dice.length ? [{ sides: dice[0].sides, rolls: damageRolls, kept: damageRolls, total }] : [],
+          modifier: 0, total, at: Date.now(), outcomes,
+        });
+        await this.commit(room);
+        return { roll: rollRecord } satisfies Requests['combat:save']['result'];
       }
 
       // ---------- custom content ----------
@@ -711,6 +903,17 @@ export class GameRoom extends DurableObject<Env> {
     return null;
   }
 
+  /** Keeps a roll in the game's roll history and shows it on every screen. */
+  private recordRoll(room: StoredRoom, roll: DiceRoll, initiativeEntry?: { init: number | null }): DiceRoll {
+    if (initiativeEntry) initiativeEntry.init = roll.total;
+    room.rolls = [roll, ...room.rolls].slice(0, 20);
+    for (const s of this.ctx.getWebSockets()) {
+      const { clientId } = s.deserializeAttachment() as Attachment;
+      if (room.members[clientId]) send(s, { type: 'dice', roll });
+    }
+    return roll;
+  }
+
   private notify(room: StoredRoom, text: string) {
     for (const s of this.ctx.getWebSockets()) {
       const { clientId } = s.deserializeAttachment() as Attachment;
@@ -777,6 +980,7 @@ export class GameRoom extends DurableObject<Env> {
       rolls: room.rolls,
       areas: room.areas,
       homebrew: room.homebrew,
+      combat: room.combat,
     };
   }
 
@@ -998,6 +1202,8 @@ function sanitizeCharacter(raw: unknown): Character {
       backstory: str(c.details?.backstory, 10000),
     },
     summary: {
+      saves: Object.fromEntries(ABILITY_KEYS.map((a) => [a, n(c.summary?.saves?.[a], -10, 30, 0)])) as Record<(typeof ABILITY_KEYS)[number], number>,
+      resistances: (Array.isArray(c.summary?.resistances) ? c.summary.resistances : []).filter((r) => typeof r === 'string').slice(0, 15).map((r) => r.slice(0, 20)),
       ac: n(c.summary?.ac, 0, 40, 10),
       speedFt: n(c.summary?.speedFt, 0, 300, 30),
       initiative: n(c.summary?.initiative, -10, 30, 0),
@@ -1158,5 +1364,121 @@ function sanitizeHomebrew(kind: HomebrewKind, raw: unknown): Record<string, unkn
         }
       : {}),
     ...(itemKind === 'armor' ? { armor: { category: oneOf(e.armor?.category, ['light', 'medium', 'heavy'] as const, 'light'), base: n(e.armor?.base, 0, 30, 11) } } : {}),
+  };
+}
+
+// ---------- combat helpers ----------
+
+function speedOf(room: StoredRoom, t: Token) {
+  const c = t.characterId ? room.characters[t.characterId] : undefined;
+  return c?.summary.speedFt ?? t.speedFt ?? 30;
+}
+
+function acOf(room: StoredRoom, t: Token) {
+  const c = t.characterId ? room.characters[t.characterId] : undefined;
+  return c?.summary.ac ?? t.stats?.ac ?? 10;
+}
+
+function saveOf(room: StoredRoom, t: Token, ability: (typeof ABILITY_KEYS)[number]) {
+  const c = t.characterId ? room.characters[t.characterId] : undefined;
+  return c?.summary.saves?.[ability] ?? t.stats?.saves?.[ability] ?? 0;
+}
+
+function hpOf(room: StoredRoom, t: Token) {
+  const c = t.characterId ? room.characters[t.characterId] : undefined;
+  return c?.hp ?? t.stats?.hp ?? null;
+}
+
+function addCondition(t: Token, c: string) {
+  t.conditions = [...new Set([...(t.conditions ?? []), c])];
+}
+
+/** Applies damage (resistance halves, immunity stops, vulnerability doubles; temp HP first). */
+function applyDamage(room: StoredRoom, t: Token, amount: number, type: string): { dealt: number; note: string } {
+  const c = t.characterId ? room.characters[t.characterId] : undefined;
+  const lower = type.toLowerCase();
+  const has = (list: string[] | undefined) => !!lower && (list ?? []).some((x) => x.toLowerCase().includes(lower));
+  let dealt = amount;
+  let note = '';
+  if (has(t.stats?.immunities)) {
+    dealt = 0;
+    note = 'immune';
+  } else if (has(c?.summary.resistances) || has(t.stats?.resistances)) {
+    dealt = Math.floor(amount / 2);
+    note = 'resisted';
+  } else if (has(t.stats?.vulnerabilities)) {
+    dealt = amount * 2;
+    note = 'vulnerable';
+  }
+  const hp = hpOf(room, t);
+  if (!hp || dealt <= 0) return { dealt, note };
+  const fromTemp = Math.min(hp.temp, dealt);
+  hp.temp -= fromTemp;
+  hp.current = Math.max(0, hp.current - (dealt - fromTemp));
+  if (hp.current === 0) {
+    addCondition(t, 'unconscious');
+    note = [note, 'down!'].filter(Boolean).join(', ');
+  }
+  return { dealt, note };
+}
+
+function heal(room: StoredRoom, t: Token, amount: number) {
+  const hp = hpOf(room, t);
+  if (!hp) return;
+  const wasDown = hp.current <= 0;
+  hp.current = Math.min(hp.max, Math.max(0, hp.current) + amount);
+  if (wasDown && hp.current > 0) {
+    t.conditions = (t.conditions ?? []).filter((c) => c !== 'unconscious');
+    const c = t.characterId ? room.characters[t.characterId] : undefined;
+    if (c) c.deathSaves = { successes: 0, failures: 0 };
+  }
+}
+
+function rollInitiative(room: StoredRoom, t: Token, me: StoredMember): DiceRoll {
+  const c = t.characterId ? room.characters[t.characterId] : undefined;
+  const bonus = c?.summary.initiative ?? t.stats?.initiative ?? 0;
+  const d20 = randomInt(20);
+  return {
+    id: crypto.randomUUID(), byId: t.ownerId ?? me.id, byName: t.name, label: `${t.name}: Initiative`,
+    groups: [{ sides: 20, rolls: [d20], kept: [d20], total: d20 }], modifier: bonus, total: d20 + bonus, at: Date.now(),
+  };
+}
+
+/** Highest initiative first; ties go to the higher bonus (players before monsters). */
+function sortOrder(room: StoredRoom, combat: Combat) {
+  const current = combat.order[combat.turn]?.tokenId;
+  combat.order = combat.order.filter((e) => room.tokens[e.tokenId]);
+  combat.order.sort((a, b) => (b.init ?? -99) - (a.init ?? -99) || Number(room.tokens[b.tokenId].kind === 'player') - Number(room.tokens[a.tokenId].kind === 'player'));
+  if (combat.round > 0 && current) combat.turn = Math.max(0, combat.order.findIndex((e) => e.tokenId === current));
+}
+
+function removeFromCombat(combat: Combat, tokenId: string) {
+  const i = combat.order.findIndex((e) => e.tokenId === tokenId);
+  if (i < 0) return;
+  combat.order.splice(i, 1);
+  if (i < combat.turn) combat.turn -= 1;
+  if (combat.turn >= combat.order.length) combat.turn = 0;
+}
+
+function diceList(raw: unknown): { count: number; sides: number }[] {
+  return (Array.isArray(raw) ? raw : [])
+    .slice(0, 6)
+    .map((g) => ({ count: Math.round(num(g?.count, 0, 40)), sides: Number(g?.sides) }))
+    .filter((g) => g.count > 0 && DICE.has(g.sides));
+}
+
+function sanitizeStats(raw: TokenStats): TokenStats {
+  const n = (v: unknown, min: number, max: number, d: number) => (Number.isFinite(Number(v)) ? Math.min(max, Math.max(min, Math.round(Number(v)))) : d);
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 15).map((x) => x.slice(0, 40)) : []);
+  const max = n(raw?.hp?.max, 1, 9999, 1);
+  return {
+    hp: { max, current: n(raw?.hp?.current, 0, 9999, max), temp: n(raw?.hp?.temp, 0, 999, 0) },
+    ac: n(raw?.ac, 0, 40, 10),
+    saves: Object.fromEntries(ABILITY_KEYS.map((a) => [a, n(raw?.saves?.[a], -10, 30, 0)])) as TokenStats['saves'],
+    initiative: n(raw?.initiative, -10, 30, 0),
+    resistances: list(raw?.resistances),
+    immunities: list(raw?.immunities),
+    vulnerabilities: list(raw?.vulnerabilities),
+    ...(typeof raw?.monster === 'string' ? { monster: raw.monster.slice(0, 60) } : {}),
   };
 }

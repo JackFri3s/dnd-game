@@ -7,15 +7,17 @@ import { MapBoard, type Camera } from '../components/MapBoard.tsx';
 import { CalibrationControls } from '../components/CalibrationControls.tsx';
 import { CampaignPanel } from '../components/CampaignPanel.tsx';
 import { ActionPanel, AimBar, useAim } from '../components/Actions.tsx';
+import { CombatPanel, MonsterBlock, MonsterPicker, RollResult, TargetBar, TokenStatus, combatInfo, useMonsters, useTargeting } from '../components/Combat.tsx';
 import { useRules } from '../rules/index.ts';
 import { CharacterList } from '../characters/CharacterList.tsx';
 import { HomebrewPanel } from '../characters/HomebrewPanel.tsx';
 import { seatNumber } from '../seats.ts';
 
 const TOKEN_SHADES = ['#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3'];
-type Panel = 'token' | 'add' | 'characters' | 'custom' | 'campaign' | 'screen' | 'players';
+type Panel = 'token' | 'combat' | 'add' | 'characters' | 'custom' | 'campaign' | 'screen' | 'players';
 const PANELS: { id: Panel; label: string }[] = [
   { id: 'token', label: 'Selected' },
+  { id: 'combat', label: 'Combat' },
   { id: 'add', label: 'Add' },
   { id: 'characters', label: 'Characters' },
   { id: 'custom', label: 'Custom' },
@@ -41,6 +43,10 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const selectedCharacter = selected?.characterId ? (state.characters.find((c) => c.id === selected.characterId) ?? null) : null;
   const rules = useRules(state.homebrew);
   const aimState = useAim(store, state);
+  const targeting = useTargeting(store, state);
+  const { current, movedFt } = combatInfo(state);
+  const monsters = useMonsters();
+  const selectedMonster = selected?.stats?.monster ? monsters?.find((m) => m.index === selected.stats!.monster) : undefined;
 
   function kick(p: Member) {
     if (!confirm(`Remove ${p.name} from the game? Their token stays on the map.`)) return;
@@ -82,7 +88,10 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
             if (t) setPanel('token');
           }}
           tableFrame={{ onMove: (c) => run(store.request('view:set', c)) }}
-          onTapMap={aimState.aim ? aimState.tapMap : undefined}
+          onTapMap={aimState.aim ? aimState.tapMap : targeting.pending ? targeting.tap : undefined}
+          movedFt={movedFt}
+          currentTokenId={current?.id ?? null}
+          showHp
           areaPreview={aimState.preview}
         />
       </div>
@@ -104,7 +113,10 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
                 <strong>{selected.name}</strong>
                 <span className="hint">{selected.kind === 'player' ? (owner ? `played by ${owner.name}` : 'no player') : selected.kind}</span>
               </p>
-              {aimState.aim ? (
+              <TokenStatus store={store} state={state} token={selected} rules={rules} />
+              {targeting.pending ? (
+                <TargetBar targeting={targeting} />
+              ) : aimState.aim ? (
                 <AimBar aimState={aimState} character={selectedCharacter} rules={rules} />
               ) : (
                 <ActionPanel
@@ -116,8 +128,10 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
                   aimState={aimState}
                   canRemoveArea={() => true}
                   dmTools
+                  targeting={targeting}
                 />
               )}
+              {selectedMonster && !targeting.pending && <MonsterBlock monster={selectedMonster} token={selected} targeting={targeting} />}
               {selected.kind === 'player' && (
                 <label className="inline-label">
                   Played by
@@ -149,7 +163,25 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
             <p className="hint">Tap a token on the map to select it. Drag tokens to move them.</p>
           ))}
 
-        {panel === 'add' && <AddToken store={store} onAdded={(id) => setSelectedId(id)} />}
+        {panel === 'combat' && (
+          <CombatPanel
+            store={store}
+            state={state}
+            onSelect={(id) => {
+              setSelectedId(id);
+              setPanel('token');
+            }}
+          />
+        )}
+
+        {panel === 'add' && (
+          <>
+            <div className="label">Monster from the rules</div>
+            <MonsterPicker store={store} onAdded={(id) => setSelectedId(id)} />
+            <div className="label">Or your own token</div>
+            <AddToken store={store} onAdded={(id) => setSelectedId(id)} />
+          </>
+        )}
 
         {panel === 'characters' && <CharacterList store={store} state={state} />}
 
@@ -180,6 +212,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
           </ul>
         )}
       </footer>
+      <RollResult roll={targeting.result} onClose={targeting.clearResult} />
       </div>
     </div>
   );

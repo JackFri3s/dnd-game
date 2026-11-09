@@ -43,6 +43,10 @@ interface Props {
   areaPreview?: AreaPreview | null;
   /** How far a token has moved this turn (combat), to count its remaining movement. */
   movedFt?: (token: Token) => number;
+  /** Whose turn it is in combat. */
+  currentTokenId?: string | null;
+  /** DM: show monsters' hit points under their tokens. */
+  showHp?: boolean;
 }
 
 const MIN_SCALE = 8;
@@ -62,6 +66,8 @@ export function MapBoard({
   onTapMap,
   areaPreview,
   movedFt,
+  currentTokenId,
+  showHp,
 }: Props) {
   const { unit } = useSettings();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -258,10 +264,13 @@ export function MapBoard({
           const at = dragging ? drag.at : posOf(token);
           const rotation = faceSeats && token.kind === 'player' ? SIDE_ROTATION[seatSide(token.ownerId)] : 0;
           const selected = selectedTokenId === token.id;
+          const conditions = token.conditions ?? [];
+          const down = conditions.includes('unconscious');
+          const hp = token.stats?.hp;
           return (
             <g
               key={token.id}
-              className={`token ${token.kind} ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''} ${canDrag(token) ? 'draggable' : ''}`}
+              className={`token ${token.kind} ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''} ${canDrag(token) ? 'draggable' : ''} ${currentTokenId === token.id ? 'current' : ''} ${down ? 'down' : ''}`}
               transform={`translate(${at.x} ${at.y})`}
               onPointerDown={(e) => onTokenPointerDown(e, token)}
               onPointerMove={(e) => onTokenPointerMove(e, token)}
@@ -276,6 +285,19 @@ export function MapBoard({
                 {token.label}
               </text>
               {token.kind === 'monster' && <circle r={0.36} className="token-monster-mark" />}
+              {currentTokenId === token.id && <circle r={0.58} className="turn-ring" />}
+              {down && <path d="M-0.25,-0.25L0.25,0.25M0.25,-0.25L-0.25,0.25" className="down-cross" />}
+              {conditions.length > 0 && (
+                <text className="condition-label" transform={`rotate(${rotation})`} dy="0.78" fontSize={0.17}>
+                  {conditions.filter((c) => c !== 'unconscious').slice(0, 2).join(', ')}
+                </text>
+              )}
+              {showHp && hp && (
+                <g transform="translate(-0.4 -0.62)">
+                  <rect className="hp-bar-bg" width={0.8} height={0.09} rx={0.04} />
+                  <rect className="hp-bar" width={0.8 * Math.max(0, hp.current / hp.max)} height={0.09} rx={0.04} />
+                </g>
+              )}
             </g>
           );
         })}

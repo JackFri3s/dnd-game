@@ -10,7 +10,7 @@ See [DESIGN.md](DESIGN.md) for the full plan.
 
 ## Status
 
-Steps 1–5 of the build order are done: **connecting the screens**, **the map board**, **saving**, **rules and characters** and **movement and ranges**.
+Steps 1–6 of the build order are done: **connecting the screens**, **the map board**, **saving**, **rules and characters**, **movement and ranges** and **combat**.
 
 - Open `/table` on the Main Screen: it shows a game code and QR code. It needs no touch screen.
 - Players scan the QR code (or open `/join`), choose **Player** or **Dungeon Master**, enter their name and pick their seat.
@@ -32,6 +32,8 @@ Steps 1–5 of the build order are done: **connecting the screens**, **the map b
 
 - **Gridless map with true ranges** (step 5): tokens move freely; dragging shows the distance in feet or metres. Each weapon shows its reach or normal/long range, each spell its range (measured from the edge of the creature's space), and spells with an area (sphere, cone, line, cube, cylinder, emanation; 73 spells) can be aimed on the map and cast as true shapes, using a spell slot. Areas stay on every screen until removed.
 - **Controls position**: during play the controls can sit at the bottom, top, left or right of the map (automatic: at the side on wide screens).
+- **Combat** (step 6): the DM starts a fight; monsters and NPCs roll initiative at once, players roll on their phones. The initiative order shows on the Main Screen (readable from both sides), with the current creature highlighted. On your turn your phone shows Action, Bonus action, Reaction, Dash, movement left and End turn; movement beyond your speed is refused. Tap an attack or spell, then tap a target: the server rolls against AC (or the target's saving throw), rolls damage (doubled dice on a critical hit, halved by resistance) and applies it. Area spells make everyone inside save. Conditions can be set on any creature; creatures at 0 HP go down (and defeated monsters are skipped in the turn order).
+- **Monsters**: the DM adds any of the 341 monsters from the free rules, with their stat block, hit points and attacks.
 - **Two looks** (Settings): **Minimal** (greyscale) or **Parchment** (the fantasy paper-and-ink look), each in light or dark. In both, movement is green, attacks are red and spells are purple.
 
 ## Run it on your computer

@@ -109,8 +109,47 @@ export interface RulesText {
   description: string;
 }
 
+export interface MonsterAction {
+  name: string;
+  desc: string;
+  attack?: number;
+  damage?: { dice: string; type: string; conditional?: boolean }[];
+  dc?: { ability: Ability; value: number };
+  reach?: number;
+  range?: { normal: number; long?: number };
+}
+
+export interface RulesMonster {
+  index: string;
+  name: string;
+  size: string;
+  type: string;
+  alignment: string;
+  cr: number;
+  xp: number;
+  ac: number;
+  hp: number;
+  hitDice: string;
+  speed: Record<string, number>;
+  abilities: Record<Ability, number>;
+  saves: Partial<Record<Ability, number>>;
+  skills: string[];
+  senses: string;
+  languages: string;
+  resistances: string[];
+  immunities: string[];
+  vulnerabilities: string[];
+  conditionImmunities: string[];
+  traits: { name: string; desc: string }[];
+  actions: MonsterAction[];
+  bonusActions: MonsterAction[];
+  reactions: { name: string; desc: string }[];
+  legendary: { name: string; desc: string }[];
+}
+
 export interface RulesData {
   source: string;
+  conditions: RulesText[];
   skills: { index: string; name: string; ability: Ability }[];
   classes: RulesClass[];
   species: RulesSpecies[];
@@ -173,7 +212,16 @@ export interface Character {
   overrides: { ac?: number; speed?: number };
   details: { appearance: string; personality: string; ideals: string; bonds: string; flaws: string; backstory: string };
   /** Calculated when saved, so the server and other screens don't need the rules data. */
-  summary: { ac: number; speedFt: number; initiative: number; passivePerception: number; classLine: string };
+  summary: {
+    ac: number;
+    speedFt: number;
+    initiative: number;
+    passivePerception: number;
+    classLine: string;
+    /** For combat on the server: saving throw bonuses and damage resistances. */
+    saves?: Record<Ability, number>;
+    resistances?: string[];
+  };
   createdWith: 'builder' | 'manual';
   updatedAt: number;
 }
@@ -319,7 +367,7 @@ export function derive(c: Character, rules: RulesData) {
     (c.classIndex === 'rogue' && r.weapon?.category === 'martial' && (r.weapon.properties.includes('Finesse') || r.weapon.properties.includes('Light')));
   const martialDie = num('martial_arts_die') ? Number(num('martial_arts_die')) : 0;
   const isMonkWeapon = (r: RulesItem) => c.classIndex === 'monk' && (r.weapon?.category === 'simple' || r.weapon?.properties.includes('Light'));
-  const attacks: { name: string; toHit: number; damage: string; range: string; proficient: boolean; save?: string }[] = [];
+  const attacks: { name: string; toHit: number; damage: string; range: string; proficient: boolean; save?: string; reachFt: number; normalFt?: number; longFt?: number; saveAbility?: Ability; dc?: number }[] = [];
   for (const item of c.items) {
     const r = item.index ? rules.items.find((x) => x.index === item.index) : undefined;
     if (!r?.weapon) continue;
@@ -342,6 +390,8 @@ export function derive(c: Character, rules: RulesData) {
         .filter(Boolean)
         .join(', '),
       proficient: isProf,
+      reachFt: w.ranged ? 0 : w.properties.includes('Reach') ? 10 : 5,
+      ...(w.range?.long ? { normalFt: w.range.normal, longFt: w.range.long } : {}),
     });
   }
   // Everyone can punch; a monk's Martial Arts makes it better.
@@ -352,13 +402,17 @@ export function derive(c: Character, rules: RulesData) {
     damage: martialDie ? `1d${martialDie}${signed(mods[unarmedAbility])} bludgeoning` : `${Math.max(1, 1 + mods.str)} bludgeoning`,
     range: 'reach 5 ft',
     proficient: true,
+    reachFt: 5,
   });
   // Dragonborn Breath Weapon.
   const breath = traitIds.find((t) => t.startsWith('draconic-breath-weapon-'));
   if (breath) {
     const type = DAMAGE_TYPE[breath.split('-').pop()!] ?? '';
     const dice = c.level >= 17 ? 4 : c.level >= 11 ? 3 : c.level >= 5 ? 2 : 1;
-    attacks.push({ name: 'Breath Weapon', toHit: 0, damage: `${dice}d10 ${type.toLowerCase()}`, range: '15 ft cone or 30 ft line', proficient: true, save: `DC ${8 + mods.con + prof} DEX` });
+    attacks.push({
+      name: 'Breath Weapon', toHit: 0, damage: `${dice}d10 ${type.toLowerCase()}`, range: '15 ft cone or 30 ft line', proficient: true,
+      save: `DC ${8 + mods.con + prof} DEX`, reachFt: 15, saveAbility: 'dex', dc: 8 + mods.con + prof,
+    });
   }
 
   // ---- limited-use features the rules give ----
@@ -462,6 +516,14 @@ export function withSummary(c: Character, rules: RulesData): Character {
   const d = derive(c, rules);
   return {
     ...c,
-    summary: { ac: d.ac, speedFt: d.speedFt, initiative: d.initiative, passivePerception: d.passivePerception, classLine: d.classLine },
+    summary: {
+      ac: d.ac,
+      speedFt: d.speedFt,
+      initiative: d.initiative,
+      passivePerception: d.passivePerception,
+      classLine: d.classLine,
+      saves: d.saves,
+      resistances: d.resistances,
+    },
   };
 }

@@ -1,6 +1,6 @@
 // Messages and data shared between the game server and every screen.
 
-import type { AreaShape, Character } from './rules.ts';
+import type { Ability, AreaShape, Character } from './rules.ts';
 import type { Homebrew, HomebrewKind } from './homebrew.ts';
 export type { Character };
 
@@ -58,6 +58,37 @@ export interface Token {
   ownerId: string | null; // the player who controls it (null = DM only)
   speedFt: number;
   characterId?: string; // the character this token stands for
+  /** Monsters and NPCs: their own numbers (player tokens use their character). */
+  stats?: TokenStats;
+  conditions?: string[]; // condition indexes, e.g. "prone", "poisoned"
+}
+
+export interface TokenStats {
+  hp: { current: number; max: number; temp: number };
+  ac: number;
+  saves: Record<Ability, number>; // total saving throw bonus per ability
+  initiative: number; // initiative bonus
+  resistances: string[];
+  immunities: string[];
+  vulnerabilities: string[];
+  monster?: string; // SRD monster index
+}
+
+/** A running fight: initiative order, whose turn it is, and what they've used. */
+export interface Combat {
+  round: number; // 0 while initiative is being rolled
+  turn: number; // index into order
+  order: { tokenId: string; init: number | null }[];
+  moved: Record<string, number>; // feet moved this turn
+  used: Record<string, { action?: boolean; bonus?: boolean; reaction?: boolean; dash?: boolean }>;
+}
+
+/** What an attack or saving throw did, shown with its roll on every screen. */
+export interface RollOutcome {
+  target: string;
+  result: 'hit' | 'crit' | 'miss' | 'saved' | 'failed';
+  damage: number;
+  note?: string; // e.g. "resisted", "down!"
 }
 
 /** A movement or range area shown around a token on every screen. */
@@ -94,6 +125,7 @@ export interface World {
   characters: Record<string, Character>;
   areas: Area[];
   homebrew: Homebrew;
+  combat: Combat | null;
 }
 
 /** A dice roll made through the app; shown on the Main Screen at the roller's seat. */
@@ -106,6 +138,7 @@ export interface DiceRoll {
   modifier: number; // added once to the whole roll (e.g. +5 for a skill check)
   total: number; // all kept dice + modifier
   at: number;
+  outcomes?: RollOutcome[]; // attacks and saves: what happened to each target
 }
 export interface DiceRequest {
   label: string;
@@ -144,6 +177,7 @@ export interface RoomState {
   rolls: DiceRoll[]; // the latest rolls, newest first
   areas: Area[];
   homebrew: Homebrew;
+  combat: Combat | null;
 }
 
 /** Standard CSS pixels per mm (96 per inch): used until the Main Screen is calibrated. */
@@ -189,7 +223,47 @@ export interface Requests {
   'view:set': { args: { x: number; y: number }; result: null };
   'token:move': { args: { tokenId: string; x: number; y: number }; result: null };
   // DM: add or remove NPC/monster tokens
-  'token:add': { args: { name: string; color: string; kind: TokenKind; x?: number; y?: number }; result: { tokenId: string } };
+  'token:add': { args: { name: string; color: string; kind: TokenKind; x?: number; y?: number; stats?: TokenStats; speedFt?: number }; result: { tokenId: string } };
+  // DM (any token) or the token's player: hit points and conditions
+  'token:hp': { args: { tokenId: string; change: number; temp?: number }; result: null }; // negative = damage
+  'token:conditions': { args: { tokenId: string; conditions: string[] }; result: null };
+
+  // ---- combat ----
+  'combat:start': { args: { tokenIds: string[] }; result: null }; // DM
+  'combat:initiative': { args: { tokenId: string; value?: number }; result: { init: number } }; // value omitted = roll
+  'combat:begin': { args: Record<string, never>; result: null }; // DM: rolls anyone missing, round 1
+  'combat:next': { args: Record<string, never>; result: null }; // DM or whoever's turn it is
+  'combat:end': { args: Record<string, never>; result: null }; // DM
+  'combat:use': { args: { tokenId: string; what: 'action' | 'bonus' | 'reaction' | 'dash'; value: boolean }; result: null };
+  /** An attack roll against a target's AC; on a hit the damage is rolled and applied. */
+  'combat:attack': {
+    args: {
+      attackerId: string;
+      targetId: string;
+      label: string;
+      toHit: number;
+      damage: { count: number; sides: number }[];
+      damageBonus: number;
+      damageType: string;
+      extra?: { count: number; sides: number; type: string }[]; // more damage on a hit (e.g. "plus 2d4 Fire")
+    };
+    result: { roll: DiceRoll };
+  };
+  /** A saving throw for one or more targets; damage on a failure (half on a success if `half`). */
+  'combat:save': {
+    args: {
+      attackerId: string | null;
+      targetIds: string[];
+      label: string;
+      ability: Ability;
+      dc: number;
+      damage: { count: number; sides: number }[];
+      damageBonus: number;
+      damageType: string;
+      half: boolean;
+    };
+    result: { roll: DiceRoll };
+  };
   'token:remove': { args: { tokenId: string }; result: null };
   'highlight:set': { args: { highlight: Highlight | null }; result: null };
   // DM: hand a player token to another player (e.g. they use a different phone this time)

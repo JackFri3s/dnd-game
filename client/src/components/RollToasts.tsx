@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SEATS, type RoomState } from '../../../shared/protocol.ts';
 import { SIDE_ROTATION } from '../seats.ts';
+import { outcomeText } from './Combat.tsx';
 
 const SHOW_MS = 9000;
 
@@ -61,6 +62,13 @@ export function RollToasts({ state }: { state: RoomState }) {
                     </small>
                   </div>
                 )}
+                {r.outcomes?.map((o, i) => (
+                  <div key={i} className="outcome">
+                    <strong>{o.target}</strong>: {outcomeText(o.result)}
+                    {o.damage > 0 ? ` · ${o.damage} damage` : ''}
+                    {o.note ? ` (${o.note})` : ''}
+                  </div>
+                ))}
                 <div className="hint">{r.byName}</div>
               </div>
             ))}

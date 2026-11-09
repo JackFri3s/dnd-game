@@ -168,6 +168,8 @@ The SRD covers the core mechanics, combat, conditions, spells, many monsters, eq
 5. Death saves, concentration checks, conditions and durations are tracked automatically.
 6. The DM controls monsters, can undo, and ends the encounter.
 
+**Built (step 6):** initiative (monsters automatically, players on their phones, DM can edit), turn order on the Main Screen, per-turn movement limit and action economy toggles, attacks and saving throws rolled by the server with damage, criticals, resistances, immunities and vulnerabilities applied, area spells hitting everyone inside, conditions, 0 HP = down, SRD monster stat blocks with attack buttons for the DM.
+
 ## 9. Saving: exact restore
 
 - **Campaign vs game:** a *campaign* is the saved world (maps, tokens, characters, ...). A *game* is one evening's connection (the 4-letter code on the Main Screen). The DM opens a campaign in a game; every change is written to the campaign immediately. A campaign can only be open in one game at a time.

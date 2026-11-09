@@ -8,6 +8,7 @@ import { read, write } from '../socket.ts';
 import { useSettings } from '../settings.ts';
 import { CalibrationCard } from '../components/CalibrationCard.tsx';
 import { RollToasts } from '../components/RollToasts.tsx';
+import { InitiativeBar, combatInfo } from '../components/Combat.tsx';
 
 const store = new GameStore('table');
 let starting = false; // guards against starting two games at once
@@ -199,7 +200,10 @@ function TableBoard({ state, code, connected }: { state: RoomState; code: string
         canDrag={() => true}
         onMoveToken={(token, to) => store.request('token:move', { tokenId: token.id, x: to.x, y: to.y })}
         faceSeats
+        currentTokenId={combatInfo(state).current?.id ?? null}
+        movedFt={combatInfo(state).movedFt}
       />
+      <InitiativeBar state={state} />
       <RollToasts state={state} />
       <div className="table-corner">
         {!connected && <span className="status warn">Reconnecting…</span>}

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { Area, RoomState, Token } from '../../../shared/protocol.ts';
 import { describeArea, dist, fromCaster, inRange, type AreaSpec, type Point } from '../../../shared/geometry.ts';
-import { withSummary, type AreaShape, type Character, type RulesData } from '../../../shared/rules.ts';
+import { derive, withSummary, type Ability, type AreaShape, type Character, type RulesData } from '../../../shared/rules.ts';
+import { areaGeometry, touchesArea } from '../../../shared/geometry.ts';
+import { parseDamageText, type useTargeting } from './Combat.tsx';
 import type { GameStore } from '../game.ts';
 import { formatDistance, useSettings } from '../settings.ts';
 import type { AreaPreview } from './MapBoard.tsx';
@@ -14,6 +16,8 @@ export interface Aim {
   tokenId: string;
   spellLevel: number; // 0 = cantrip / no slot
   target: Point | null;
+  /** Spells that ask for a saving throw: everyone in the area rolls when it's cast. */
+  save?: { ability: Ability; dc: number; damage: string; half: boolean };
 }
 
 /** Everything a page needs to aim and cast an area. */
@@ -68,6 +72,26 @@ export function useAim(store: GameStore, state: RoomState) {
     if (!preview || !aim) return;
     try {
       await store.request('area:add', { area: preview });
+      // Everyone (partly) inside the area makes the saving throw; damage is applied.
+      if (aim.save) {
+        const g = areaGeometry(aim.spec, preview.origin, preview.target, aim.rangeFt);
+        const caster = state.tokens.find((t) => t.id === aim.tokenId);
+        const targetIds = state.tokens.filter((t) => touchesArea(g, t) && (t.id !== aim.tokenId || !fromCaster(aim.spec, aim.rangeFt))).map((t) => t.id);
+        if (targetIds.length) {
+          const d = parseDamageText(aim.save.damage);
+          await store.request('combat:save', {
+            attackerId: caster?.id ?? null,
+            targetIds,
+            label: aim.label,
+            ability: aim.save.ability,
+            dc: aim.save.dc,
+            damage: d.dice,
+            damageBonus: d.bonus,
+            damageType: d.type,
+            half: aim.save.half,
+          });
+        }
+      }
       // Use the lowest free spell slot of the spell's level or higher.
       if (character && rules && aim.spellLevel > 0) {
         const slots = rules.classes.find((c) => c.index === character.classIndex)?.levels.find((l) => l.level === character.level)?.slots ?? [];
@@ -150,6 +174,7 @@ export function ActionPanel({
   aimState,
   canRemoveArea,
   dmTools,
+  targeting,
 }: {
   store: GameStore;
   state: RoomState;
@@ -160,6 +185,8 @@ export function ActionPanel({
   canRemoveArea: (a: Area) => boolean;
   /** The DM always gets the general ranges and area shapes, for any token. */
   dmTools?: boolean;
+  /** Attacks and single-target spells: choose a target to resolve them. */
+  targeting?: ReturnType<typeof useTargeting>;
 }) {
   const { unit } = useSettings();
   const [error, setError] = useState<string | null>(null);
@@ -173,23 +200,59 @@ export function ActionPanel({
   };
   const isOn = (kind: string, feet: number, label?: string) => h?.kind === kind && h.feet === feet && h.label === label;
 
-  // Weapons: melee reach, or normal/long range.
-  const weapons =
-    character && rules
-      ? character.items
-          .map((i) => ({ item: i, w: i.index ? rules.items.find((r) => r.index === i.index)?.weapon : undefined }))
-          .filter((x) => x.w)
-          .map(({ item, w }) => ({
-            name: item.name,
-            feet: w!.ranged || (w!.properties.includes('Thrown') && w!.range?.long) ? (w!.range?.normal ?? 5) : w!.properties.includes('Reach') ? 10 : 5,
-            longFeet: w!.ranged || w!.properties.includes('Thrown') ? w!.range?.long : undefined,
-            ranged: !!w!.ranged,
-          }))
-      : [];
+  // Attacks and spells, worked out from the character.
+  const d = character && rules ? derive(character, rules) : null;
+  const weapons = d ? d.attacks : [];
   const spells =
     character && rules
-      ? [...character.cantrips, ...character.spells].map((id) => rules.spells.find((s) => s.index === id)).filter((s) => !!s)
+      ? [...new Set([...character.cantrips, ...character.spells, ...(d?.bonusSpells ?? []).map((b) => b.index)])]
+          .map((id) => rules.spells.find((s) => s.index === id))
+          .filter((s): s is NonNullable<typeof s> => !!s)
       : [];
+  const spellAbility = (index: string): Ability | null => d?.bonusSpells.find((b) => b.index === index)?.ability ?? d?.spellcasting?.ability ?? null;
+  const spellDc = (index: string) => {
+    const a = spellAbility(index);
+    return a && d ? 8 + d.prof + d.mods[a] : 10;
+  };
+  const spellAttack = (index: string) => {
+    const a = spellAbility(index);
+    return a && d ? d.prof + d.mods[a] : 0;
+  };
+  const halfOnSave = (text: string) => /half as much damage/i.test(text);
+
+  function pickWeapon(w: (typeof weapons)[number]) {
+    const feet = w.normalFt ?? w.reachFt;
+    if (!targeting) return show('range', feet, w.name, w.longFt);
+    if (w.saveAbility && w.dc) {
+      // Breath Weapon: aim the cone/line like a spell.
+      return aimState.start({
+        label: w.name, spec: { shape: 'cone', sizeFt: 15 }, rangeFt: 0, tokenId: token.id, spellLevel: 0,
+        save: { ability: w.saveAbility, dc: w.dc, damage: w.damage, half: true },
+      });
+    }
+    targeting.start({ kind: 'attack', attackerId: token.id, label: w.name, toHit: w.toHit, damage: w.damage, rangeFt: feet, longFt: w.longFt });
+  }
+
+  function pickSpell(s: (typeof spells)[number]) {
+    if (s.area) {
+      return aimState.start({
+        label: s.name,
+        spec: { shape: s.area.shape, sizeFt: s.area.size, widthFt: s.area.width },
+        rangeFt: s.rangeFt,
+        tokenId: token.id,
+        spellLevel: s.level,
+        ...(s.save ? { save: { ability: s.save, dc: spellDc(s.index), damage: s.damage ?? '', half: halfOnSave(s.description) } } : {}),
+      });
+    }
+    if (targeting && s.attack && s.damage) {
+      return targeting.start({ kind: 'attack', attackerId: token.id, label: s.name, toHit: spellAttack(s.index), damage: s.damage, rangeFt: s.rangeFt ?? 5 });
+    }
+    if (targeting && s.save) {
+      return targeting.start({ kind: 'save', attackerId: token.id, label: s.name, ability: s.save, dc: spellDc(s.index), damage: s.damage ?? '', half: halfOnSave(s.description), rangeFt: s.rangeFt ?? 5 });
+    }
+    show('spell', s.rangeFt ?? 0, s.name);
+  }
+
   const areas = state.areas.filter((a) => canRemoveArea(a));
 
   return (
@@ -210,8 +273,15 @@ export function ActionPanel({
           <div className="label">Attacks</div>
           <div className="chip-row">
             {weapons.map((w, i) => (
-              <button key={i} className={`chip range ${isOn('range', w.feet, w.name) ? 'on' : ''}`} onClick={() => show('range', w.feet, w.name, w.longFeet)}>
-                {w.name} <span className="chip-meta">{w.longFeet ? `${fmt(w.feet)}/${fmt(w.longFeet)}` : fmt(w.feet)}</span>
+              <button
+                key={i}
+                className={`chip range ${targeting?.pending?.label === w.name || isOn('range', w.normalFt ?? w.reachFt, w.name) ? 'on' : ''}`}
+                onClick={() => pickWeapon(w)}
+              >
+                {w.name}{' '}
+                <span className="chip-meta">
+                  {w.save ? w.save : `${w.toHit >= 0 ? '+' : ''}${w.toHit}`} · {w.longFt ? `${fmt(w.normalFt!)}/${fmt(w.longFt)}` : fmt(w.reachFt)}
+                </span>
               </button>
             ))}
           </div>
@@ -222,29 +292,27 @@ export function ActionPanel({
         <>
           <div className="label">Spells</div>
           <div className="chip-row">
-            {spells.map((s) =>
-              s.area ? (
-                <button
-                  key={s.index}
-                  className={`chip spell ${aimState.aim?.label === s.name ? 'on' : ''}`}
-                  onClick={() =>
-                    aimState.start({ label: s.name, spec: { shape: s.area!.shape, sizeFt: s.area!.size, widthFt: s.area!.width }, rangeFt: s.rangeFt, tokenId: token.id, spellLevel: s.level })
-                  }
-                >
-                  {s.name} <span className="chip-meta">{describeArea({ shape: s.area.shape, sizeFt: s.area.size, widthFt: s.area.width }, fmt)}</span>
-                </button>
-              ) : (
-                <button
-                  key={s.index}
-                  className={`chip spell ${isOn('spell', s.rangeFt ?? 0, s.name) ? 'on' : ''}`}
-                  disabled={!s.rangeFt}
-                  onClick={() => show('spell', s.rangeFt ?? 0, s.name)}
-                  title={s.range}
-                >
-                  {s.name} <span className="chip-meta">{s.rangeFt === 5 ? 'touch' : s.rangeFt ? fmt(s.rangeFt) : s.range.toLowerCase()}</span>
-                </button>
-              ),
-            )}
+            {spells.map((s) => (
+              <button
+                key={s.index}
+                className={`chip spell ${aimState.aim?.label === s.name || targeting?.pending?.label === s.name || isOn('spell', s.rangeFt ?? 0, s.name) ? 'on' : ''}`}
+                disabled={!s.area && !s.rangeFt}
+                onClick={() => pickSpell(s)}
+                title={s.range}
+              >
+                {s.name}{' '}
+                <span className="chip-meta">
+                  {s.area
+                    ? describeArea({ shape: s.area.shape, sizeFt: s.area.size, widthFt: s.area.width }, fmt)
+                    : s.rangeFt === 5
+                      ? 'touch'
+                      : s.rangeFt
+                        ? fmt(s.rangeFt)
+                        : s.range.toLowerCase()}
+                  {s.save ? ` · DC ${spellDc(s.index)}` : s.attack ? ` · +${spellAttack(s.index)}` : ''}
+                </span>
+              </button>
+            ))}
           </div>
         </>
       )}

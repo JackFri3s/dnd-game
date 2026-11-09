@@ -451,8 +451,8 @@ button.diamond:disabled { cursor: default; opacity: 1; }
 .roll-layer { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
 .roll-stack { position: absolute; width: 0; height: 0; }
 .roll-stack-inner { position: absolute; translate: -50% -50%; display: flex; flex-direction: column; gap: 8px; align-items: center; }
-.roll-bottom { left: 50%; top: calc(100% - 110px); }
-.roll-top { left: 50%; top: 110px; }
+.roll-bottom { left: 50%; top: calc(100% - 150px); }
+.roll-top { left: 50%; top: 150px; }
 .roll-left { left: 130px; top: 50%; }
 .roll-right { left: calc(100% - 130px); top: 50%; }
 .roll-card { min-width: 220px; padding: 10px 18px; border-radius: 10px; background: var(--primary); color: var(--on-primary); text-align: center; box-shadow: 0 6px 24px rgb(0 0 0 / 0.25); animation: roll-in 0.25s ease-out; }
@@ -564,3 +564,41 @@ body:has(.overlay) { overflow: hidden; }
 .text-entry { padding: 6px 0; border-bottom: 1px solid var(--line); }
 label.check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
 label.check input { width: auto; margin: 0; }
+
+/* ---------- Combat ---------- */
+.turn-ring { fill: none; stroke: var(--range); stroke-width: 0.06; stroke-dasharray: 0.12 0.08; animation: turn-spin 6s linear infinite; }
+@keyframes turn-spin { to { stroke-dashoffset: -2; } }
+.token.down .token-body, .token.down .token-ring { opacity: 0.35; }
+.down-cross { stroke: var(--range); stroke-width: 0.08; stroke-linecap: round; }
+.condition-label { fill: var(--text); font-family: Inter, system-ui, sans-serif; font-weight: 600; text-anchor: middle; paint-order: stroke; stroke: var(--board); stroke-width: 0.04; pointer-events: none; }
+.hp-bar-bg { fill: var(--line-strong); }
+.hp-bar { fill: var(--move); }
+.combat-bar { border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+.combat-bar.my-turn { border-color: var(--range); box-shadow: inset 0 0 0 1px var(--range); }
+.combat-bar .chip-row { margin-top: 6px; }
+.chip.used { background: var(--surface-2); color: var(--text-soft); text-decoration: line-through; }
+.button.important-red { background: var(--range); border-color: var(--range); color: #fff; }
+.attack-label { color: var(--range); }
+.roll-toast.result { border-radius: 12px; max-width: min(92vw, 520px); font-size: 0.9rem; }
+.roll-toast.result .hint { color: inherit; opacity: 0.75; }
+.initiative-edge { position: absolute; left: 50%; translate: -50% 0; z-index: 15; pointer-events: none; }
+.initiative-edge.bottom { bottom: 10px; }
+.initiative-edge.top { top: 10px; rotate: 180deg; }
+.initiative-bar { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line-strong); box-shadow: 0 2px 10px rgb(0 0 0 / 0.12); white-space: nowrap; font-size: 0.85rem; }
+.initiative-bar .round { font-weight: 700; margin-right: 4px; }
+.init-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.init-chip.current { border-color: var(--range); background: var(--range); color: #fff; font-weight: 600; }
+.init-chip.down { opacity: 0.45; text-decoration: line-through; }
+.init-chip .init { opacity: 0.7; font-size: 0.8em; }
+.current-row { background: color-mix(in srgb, var(--range) 10%, transparent); }
+.down-text { color: var(--range); }
+.token-status { margin: 8px 0; }
+.conditions .pill { font-size: 0.75rem; padding: 3px 7px; }
+.condition-on { background: var(--range) !important; border-color: var(--range) !important; color: #fff !important; }
+.monster-block { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.monster-abilities { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; font-size: 0.8rem; margin: 6px 0; }
+.monster-action { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.roll-card .outcome { font-size: 0.95rem; }
+.roll-card .outcome strong { font-size: 1rem; }
+.roll-toast.result strong { font-size: 1rem; }
+.roll-layer .roll-card { max-width: 340px; }
