@@ -10,17 +10,19 @@ See [DESIGN.md](DESIGN.md) for the full plan.
 
 ## Status
 
-**Step 1, connecting the screens**, and **step 2, the hex board**, are done.
+Steps 1–3 of the build order are done: **connecting the screens**, **the hex board** and **saving**.
 
 - Open `/table` on the Main Screen: it shows a game code and QR code. It needs no touch screen.
-- Players scan the QR code (or open `/join`), choose **Player** or **Dungeon Master**, enter their name and pick their seat. They can switch roles later.
-- The **DM** starts the campaign and can go back to the lobby.
-- The DM **calibrates** the Main Screen with a bank card, so hexes are 1 inch (or another size) on the table and fit miniatures.
+- Players scan the QR code (or open `/join`), choose **Player** or **Dungeon Master**, enter their name and pick their seat.
+- The **DM** picks or creates a **campaign**, then starts it. The DM calibrates the Main Screen with a bank card so hexes fit miniatures; each Main Screen remembers its calibration.
 - The Main Screen shows the hex map at true size; the DM chooses which part it shows.
-- Every player gets a token. Players drag their own token on their phone; the DM and the Main Screen (if it has touch) can move any token. The DM adds monster and NPC tokens.
-- Movement and range areas (e.g. 30 ft, 60 ft) can be shown around a token on every screen.
+- Players drag their own token; the DM and the Main Screen (if it has touch) can move any token. The DM adds monster and NPC tokens.
+- Movement and range areas can be shown around a token on every screen.
+- **Saving:** everything is saved to the campaign after every change. Next session, open a new game on the Main Screen, the DM opens the campaign, and everyone is back in the same situation (players on the same phone get their own token back; the DM can hand a token to someone on a new phone).
+- **Save points:** the DM can make save points and go back to any of them (one is made automatically at the start of every session, and before going back).
+- **Backups:** the DM can download a campaign as a file and upload it again. A **campaign key** lets the DM open the campaign from another device.
+- **Settings** (home menu): distances in hexes, feet or metres, and light/dark appearance.
 
-Games are stored by Cloudflare, so they survive server restarts and updates. (Saving the full game, such as map, characters and combat, comes with those features.)
 
 ## Run it on your computer
 
@@ -52,6 +54,6 @@ You can also deploy from your own computer with `npm run deploy` (it asks you to
 | Folder | What's in it |
 |---|---|
 | `client/` | The web app all screens use (React). |
-| `worker/` | The game server on Cloudflare: `index.ts` is the front door, `room.ts` is one game (a Durable Object). |
+| `worker/` | The game server on Cloudflare: `index.ts` is the front door, `room.ts` is one game, `campaign.ts` stores campaigns and save points (all Durable Objects). |
 | `shared/` | Definitions used by both, like the messages and the seats. |
 | `wrangler.jsonc` | Cloudflare settings. |

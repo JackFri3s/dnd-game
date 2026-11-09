@@ -1,11 +1,13 @@
 import { CARD_MM, type TableSettings } from '../../../shared/protocol.ts';
 import { hexCorners, hexToPoint } from '../../../shared/hex.ts';
+import { formatLength, useSettings } from '../settings.ts';
 
 /**
  * Shown on the Main Screen while the DM calibrates it: a bank-card outline and a
  * few test hexes drawn at the size the screen currently thinks is real.
  */
 export function CalibrationCard({ table }: { table: TableSettings }) {
+  const { unit } = useSettings();
   const card = { w: CARD_MM.w * table.pxPerMm, h: CARD_MM.h * table.pxPerMm };
   const hexPx = table.hexMm * table.pxPerMm;
   const testHexes = [
@@ -42,11 +44,11 @@ export function CalibrationCard({ table }: { table: TableSettings }) {
           </g>
         </svg>
         <p className="hint">
-          Each hex is {table.hexMm.toFixed(1)} mm ({(table.hexMm / 25.4).toFixed(2)} in) wide. Put a miniature on one to check it fits.
+          Each hex is {formatLength(table.hexMm, unit)} wide. Put a miniature on one to check it fits.
         </p>
       </div>
       <div className="calib-ruler" style={{ width: ruler }}>
-        <span>10 cm</span>
+        <span>10 cm (3.94 in)</span>
       </div>
       <p className="hint">Keyboard on this screen? Use + and − to adjust, Enter when done.</p>
     </main>

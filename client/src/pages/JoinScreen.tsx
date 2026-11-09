@@ -6,6 +6,7 @@ import { seatNumber } from '../seats.ts';
 import { PlayerGame } from './PlayerGame.tsx';
 import { DmGame } from './DmGame.tsx';
 import { CalibrationControls } from '../components/CalibrationControls.tsx';
+import { CampaignPanel } from '../components/CampaignPanel.tsx';
 
 type Role = 'player' | 'dm';
 const stores = { player: new GameStore('player'), dm: new GameStore('dm') };
@@ -34,17 +35,21 @@ export function JoinScreen({ initialRole }: { initialRole: Role }) {
   return (
     <main className={`page join ${inGame && playing ? 'in-play' : ''}`}>
       {!(inGame && playing) && (
-        <header className="join-header">
-          <a href="/" className="title small">dnd</a>
+        <header className="page-header">
+          <a href="/" className="back">← dnd</a>
           {game.code && (
             <span className={`dot ${game.status === 'open' ? 'on' : 'off'}`} title={game.status === 'open' ? 'Connected' : 'Offline'} />
           )}
         </header>
       )}
       {inGame && game.status !== 'open' && <p className="status warn">Connection lost, reconnecting…</p>}
-      {game.notice && <p className="status">{game.notice}</p>}
+      {game.notice && (
+        <p className="status" onClick={() => store.dismissNotice()}>
+          {game.notice} <span className="hint">(tap to close)</span>
+        </p>
+      )}
       {game.ended === 'replaced' ? (
-        <button className="primary" onClick={() => store.open(game.code!)}>Use this device instead</button>
+        <button className="button primary block" onClick={() => store.open(game.code!)}>Use this device instead</button>
       ) : inGame ? (
         role === 'player' ? (
           playing ? (
@@ -116,12 +121,12 @@ function JoinForm({ store, role, onRoleChange }: { store: GameStore; role: Role;
   return (
     <form className="card" onSubmit={submit}>
       <h2>Join the game</h2>
-      <div className="role-toggle" role="radiogroup" aria-label="Join as">
+      <div className="segmented" role="radiogroup" aria-label="Join as">
         <button type="button" role="radio" aria-checked={role === 'player'} className={role === 'player' ? 'on' : ''} onClick={() => onRoleChange('player')}>
-          🛡️ Player
+          Player
         </button>
         <button type="button" role="radio" aria-checked={role === 'dm'} className={role === 'dm' ? 'on' : ''} onClick={() => onRoleChange('dm')}>
-          📜 Dungeon Master
+          Dungeon Master
         </button>
       </div>
       <label>
@@ -154,7 +159,7 @@ function JoinForm({ store, role, onRoleChange }: { store: GameStore; role: Role;
       )}
 
       {error && <p className="error">{error}</p>}
-      <button className="primary" disabled={busy || code.length !== 4 || !name.trim() || (role === 'dm' && dmTaken)}>
+      <button className="button primary block" disabled={busy || code.length !== 4 || !name.trim() || (role === 'dm' && dmTaken)}>
         {busy ? 'Joining…' : role === 'dm' ? 'Join as Dungeon Master' : 'Join as player'}
       </button>
     </form>
@@ -188,7 +193,10 @@ function PlayerLobby({
         <span className="badge-dot big" style={{ background: me.color }} />
         {me.name}
       </h2>
-      <p>Waiting for the Dungeon Master to start the campaign.</p>
+      <p>
+        Waiting for the Dungeon Master to start
+        {state.campaign ? <> <strong>{state.campaign.name}</strong></> : ' the campaign'}.
+      </p>
       <fieldset>
         <legend>Your seat</legend>
         <SeatPicker value={me.seat} taken={taken} onChange={changeSeat} />
@@ -197,10 +205,10 @@ function PlayerLobby({
       <h3>At the table</h3>
       <MemberList dm={dm} players={others} />
       <div className="row-buttons">
-        <button className="link-button" onClick={onSwitchRole} disabled={!!dm}>
+        <button className="text-button" onClick={onSwitchRole} disabled={!!dm}>
           {dm ? 'There is already a Dungeon Master' : 'Be the Dungeon Master instead'}
         </button>
-        <button className="link-button" onClick={() => store.leave()}>Leave game</button>
+        <button className="text-button" onClick={() => store.leave()}>Leave game</button>
       </div>
     </section>
   );
@@ -228,39 +236,54 @@ function DmLobby({
   }
 
   return (
-    <section className="card" data-testid="dm-lobby">
-      <p className="label">Dungeon Master of game <strong>{state.code}</strong></p>
-      <h2 className="me-name">📜 {me.name}</h2>
-      <p className="status-line">
-        <span className={`dot ${table?.connected ? 'on' : 'off'}`} /> Main Screen {table?.connected ? 'connected' : 'offline'}
-      </p>
+    <section className="stack" data-testid="dm-lobby">
+      <div className="card">
+        <div className="label">Dungeon Master · game {state.code}</div>
+        <h2 className="me-name">{me.name}</h2>
+        <p className="status-line">
+          <span className={`dot ${table?.connected ? 'on' : 'off'}`} /> Main Screen {table?.connected ? 'connected' : 'offline'}
+        </p>
+      </div>
 
-      <button className="primary" onClick={() => run(store.request('game:phase', { phase: 'playing' }))} data-testid="start-campaign">
-        ▶ Start the campaign
-      </button>
-      <p className="hint">Players can still join after the start: the join code stays visible on the Main Screen.</p>
+      <div className="card">
+        <CampaignPanel store={store} state={state} />
+        <button
+          className="button primary block"
+          disabled={!state.campaign}
+          onClick={() => run(store.request('game:phase', { phase: 'playing' }))}
+          data-testid="start-campaign"
+        >
+          {state.campaign ? `Start ${state.campaign.name}` : 'Choose a campaign to start'}
+        </button>
+        <p className="hint">Players can still join after the start: the join code stays visible on the Main Screen.</p>
+      </div>
 
-      <h3>Main Screen size</h3>
-      <CalibrationControls store={store} table={state.table} />
+      <div className="card">
+        <h3>Main Screen size</h3>
+        <CalibrationControls store={store} table={state.table} />
+      </div>
 
-      <h3>Players ({players.length})</h3>
-      {players.length === 0 && <p className="hint">Players join by scanning the QR code on the Main Screen.</p>}
-      <ul className="member-list">
-        {players.map((p) => (
-          <li key={p.id}>
-            <span className="badge-dot" style={{ background: p.color }} />
-            <span className="grow">
-              {p.name}
-              <span className="hint"> · Seat {seatNumber(p.seat) || '–'}{!p.connected && ' · away'}</span>
-            </span>
-            <button className="small-button" onClick={() => kick(p)}>Remove</button>
-          </li>
-        ))}
-      </ul>
+      <div className="card">
+        <h3>Players ({players.length})</h3>
+        {players.length === 0 && <p className="hint">Players join by scanning the QR code on the Main Screen.</p>}
+        <ul className="list">
+          {players.map((p) => (
+            <li key={p.id}>
+              <span className="badge-dot" style={{ background: p.color }} />
+              <span className="grow">
+                {p.name}
+                <span className="hint"> · Seat {seatNumber(p.seat) || '–'}{!p.connected && ' · away'}</span>
+              </span>
+              <button className="button small" onClick={() => kick(p)}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      </div>
       {error && <p className="error">{error}</p>}
       <div className="row-buttons">
-        <button className="link-button" onClick={onSwitchRole}>Join as a player instead</button>
-        <button className="link-button" onClick={() => store.leave()}>Leave game</button>
+        <button className="text-button" onClick={onSwitchRole}>Join as a player instead</button>
+        <button className="text-button" onClick={() => store.leave()}>Leave game</button>
+        <a className="text-button" href="/settings">Settings</a>
       </div>
     </section>
   );
@@ -268,14 +291,15 @@ function DmLobby({
 
 export function MemberList({ dm, players }: { dm: Member | undefined; players: Member[] }) {
   return (
-    <ul className="member-list">
+    <ul className="list">
       <li>
-        📜 {dm ? <>{dm.name} <em>(Dungeon Master)</em>{!dm.connected && ' – away'}</> : <em>No Dungeon Master yet</em>}
+        <span className="badge-dot dm" />
+        {dm ? <>{dm.name} <span className="hint">Dungeon Master{!dm.connected && ' · away'}</span></> : <span className="hint">No Dungeon Master yet</span>}
       </li>
       {players.map((p) => (
         <li key={p.id}>
           <span className="badge-dot" style={{ background: p.color }} /> {p.name}
-          {!p.connected && <em> – away</em>}
+          {!p.connected && <span className="hint"> · away</span>}
         </li>
       ))}
     </ul>

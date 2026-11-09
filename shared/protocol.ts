@@ -62,10 +62,36 @@ export interface Highlight {
   feet: number;
 }
 
+/** The part of a game that belongs to the campaign and is saved with it. */
+export interface World {
+  board: { cols: number; rows: number };
+  tokens: Record<string, Token>;
+  view: { x: number; y: number };
+  highlight: Highlight | null;
+  nextTokenId: number;
+}
+
+export interface CampaignSummary {
+  key: string; // secret: whoever has it can open the campaign
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A save point the DM can go back to. */
+export interface SnapshotInfo {
+  id: string;
+  name: string;
+  at: number;
+  auto: boolean; // made automatically (e.g. at the start of a session)
+}
+
 export interface RoomState {
   code: string;
   members: Member[];
   phase: Phase;
+  /** The campaign loaded in this game (needed before the DM can start). */
+  campaign: { name: string } | null;
   table: TableSettings;
   /** Centre of what the Main Screen shows, in map units (see shared/hex.ts). */
   view: { x: number; y: number };
@@ -79,9 +105,10 @@ export const DEFAULT_PX_PER_MM = 96 / 25.4;
 export const DEFAULT_HEX_MM = 25.4;
 export const CARD_MM = { w: 85.6, h: 53.98 }; // bank/credit card (ISO/IEC 7810 ID-1)
 
+/** Muted colours so players can tell their tokens apart on an otherwise greyscale screen. */
 export const PLAYER_COLORS = [
-  '#d94f3d', '#3d7bd9', '#3da35d', '#d9a13d',
-  '#8f4fd9', '#2fb3b3', '#d94f9b', '#7a7a7a',
+  '#a8574f', '#4f6fa8', '#5a8a63', '#a8894f',
+  '#7d5fa0', '#4f9494', '#a05f82', '#6b6b6b',
 ];
 
 export const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O: easy to read off a screen
@@ -119,6 +146,22 @@ export interface Requests {
   'token:add': { args: { name: string; color: string; kind: TokenKind; q?: number; r?: number }; result: { tokenId: string } };
   'token:remove': { args: { tokenId: string }; result: null };
   'highlight:set': { args: { highlight: Highlight | null }; result: null };
+  // DM: hand a player token to another player (e.g. they use a different phone this time)
+  'token:assign': { args: { tokenId: string; memberId: string | null }; result: null };
+
+  // ---- campaigns (DM only) ----
+  'campaign:list': { args: Record<string, never>; result: { campaigns: CampaignSummary[]; current: string | null } };
+  'campaign:create': { args: { name: string }; result: { campaign: CampaignSummary } };
+  'campaign:load': { args: { key: string }; result: null };
+  'campaign:add': { args: { key: string }; result: { campaign: CampaignSummary } }; // open on another DM device
+  'campaign:forget': { args: { key: string }; result: null }; // remove from this device's list
+  'campaign:rename': { args: { name: string }; result: null };
+  'campaign:snapshots': { args: Record<string, never>; result: { snapshots: SnapshotInfo[] } };
+  'campaign:snapshot': { args: { name: string }; result: { snapshot: SnapshotInfo } };
+  'campaign:restore': { args: { snapshotId: string }; result: null };
+  'campaign:delete-snapshot': { args: { snapshotId: string }; result: null };
+  'campaign:export': { args: Record<string, never>; result: { data: unknown; name: string } };
+  'campaign:import': { args: { data: unknown }; result: { campaign: CampaignSummary } };
 }
 export type RequestName = keyof Requests;
 
@@ -130,6 +173,7 @@ export type ServerMessage =
   | { type: 'reply'; id: number; ok: true; data: unknown }
   | { type: 'reply'; id: number; ok: false; error: string }
   | { type: 'room:state'; state: RoomState }
+  | { type: 'notice'; text: string }
   | { type: 'room:kicked' };
 
 /** WebSocket close codes with a special meaning (the client should not reconnect). */

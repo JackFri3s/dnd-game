@@ -3,13 +3,21 @@ import type { Highlight, Member, RoomState, TokenKind } from '../../../shared/pr
 import type { GameStore } from '../game.ts';
 import { HexBoard, type Camera } from '../components/HexBoard.tsx';
 import { CalibrationControls } from '../components/CalibrationControls.tsx';
+import { CampaignPanel } from '../components/CampaignPanel.tsx';
+import { RangeChips } from '../components/RangeChips.tsx';
 import { seatNumber } from '../seats.ts';
 
-const TOKEN_COLORS = ['#5b5b5b', '#8b2e1f', '#2f6b3a', '#6b4a8b', '#b07a1f', '#1f5f8b'];
-const RANGES = [5, 30, 60, 120];
-type Panel = 'token' | 'add' | 'screen' | 'players';
+const TOKEN_SHADES = ['#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3'];
+type Panel = 'token' | 'add' | 'campaign' | 'screen' | 'players';
+const PANELS: { id: Panel; label: string }[] = [
+  { id: 'token', label: 'Selected' },
+  { id: 'add', label: 'Add' },
+  { id: 'campaign', label: 'Campaign' },
+  { id: 'screen', label: 'Main Screen' },
+  { id: 'players', label: 'Players' },
+];
 
-/** The DM's device during play: the whole map, every token, and the Main Screen controls. */
+/** The DM's device during play: the whole map, every token, and the controls. */
 export function DmGame({ store, state }: { store: GameStore; state: RoomState }) {
   const [camera, setCamera] = useState<Camera>({ ...state.view, scale: 40 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -21,30 +29,32 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
   const selected = state.tokens.find((t) => t.id === selectedId) ?? null;
   const players = state.members.filter((m) => m.role === 'player');
   const table = state.members.find((m) => m.role === 'table');
+  const owner = selected?.ownerId ? state.members.find((m) => m.id === selected.ownerId) : null;
 
   const showHighlight = (h: Omit<Highlight, 'tokenId'> | null) =>
     selected && run(store.request('highlight:set', { highlight: h && { ...h, tokenId: selected.id } }));
-  const active = selected && state.highlight?.tokenId === selected.id ? state.highlight : null;
 
   function kick(p: Member) {
-    if (!confirm(`Remove ${p.name} from the game?`)) return;
+    if (!confirm(`Remove ${p.name} from the game? Their token stays on the map.`)) return;
     run(store.request('dm:kick', { memberId: p.id }));
   }
 
   return (
     <div className="game-layout" data-testid="dm-game">
       <header className="game-bar">
-        <strong className="grow">📜 Dungeon Master · {state.code}</strong>
+        <strong className="grow">{state.campaign?.name ?? 'Dungeon Master'}</strong>
+        <span className="hint">{state.code}</span>
         <span className={`dot ${table?.connected ? 'on' : 'off'}`} title={`Main Screen ${table?.connected ? 'connected' : 'offline'}`} />
-        <button className="small-button" onClick={() => setCamera({ ...camera, ...state.view })}>📺 Find Main Screen</button>
-        <button className="small-button" onClick={() => setMenu(!menu)} aria-expanded={menu}>☰</button>
+        <button className="button small" onClick={() => setCamera({ ...camera, ...state.view })}>Find Main Screen</button>
+        <button className="button small" onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu">☰</button>
       </header>
       {menu && (
         <div className="game-menu">
-          <button className="link-button" onClick={() => run(store.request('game:phase', { phase: 'lobby' }))}>
+          <button className="text-button" onClick={() => run(store.request('game:phase', { phase: 'lobby' }))}>
             Back to the lobby (shows the join screen on the Main Screen)
           </button>
-          <button className="link-button" onClick={() => store.leave()}>Leave game</button>
+          <a className="text-button" href="/settings">Settings</a>
+          <button className="text-button" onClick={() => store.leave()}>Leave game</button>
         </div>
       )}
       <div className="game-board">
@@ -64,9 +74,9 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
       </div>
       <footer className="game-controls">
         <nav className="tabs">
-          {(['token', 'add', 'screen', 'players'] as Panel[]).map((p) => (
-            <button key={p} className={panel === p ? 'on' : ''} onClick={() => setPanel(p)}>
-              {{ token: 'Selected', add: 'Add token', screen: 'Main Screen', players: `Players (${players.length})` }[p]}
+          {PANELS.map((p) => (
+            <button key={p.id} className={panel === p.id ? 'on' : ''} onClick={() => setPanel(p.id)}>
+              {p.id === 'players' ? `${p.label} (${players.length})` : p.label}
             </button>
           ))}
         </nav>
@@ -74,45 +84,47 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
 
         {panel === 'token' &&
           (selected ? (
-            <div>
-              <p>
-                <span className="badge-dot" style={{ background: selected.color }} /> <strong>{selected.name}</strong>{' '}
-                <span className="hint">({selected.kind})</span>
+            <div className="stack-sm">
+              <p className="row">
+                <span className="badge-dot" style={{ background: selected.color }} />
+                <strong>{selected.name}</strong>
+                <span className="hint">{selected.kind === 'player' ? (owner ? `played by ${owner.name}` : 'no player') : selected.kind}</span>
               </p>
-              <div className="chip-row">
-                <button className={`chip ${active?.kind === 'move' ? 'on' : ''}`} onClick={() => showHighlight({ kind: 'move', feet: selected.speedFt })}>
-                  🥾 Movement {selected.speedFt} ft
-                </button>
-                {RANGES.map((ft) => (
-                  <button
-                    key={ft}
-                    className={`chip ${active?.kind === 'range' && active.feet === ft ? 'on' : ''}`}
-                    onClick={() => showHighlight({ kind: 'range', feet: ft })}
+              <RangeChips token={selected} highlight={state.highlight} onShow={showHighlight} />
+              {selected.kind === 'player' && (
+                <label className="inline-label">
+                  Played by
+                  <select
+                    value={selected.ownerId && owner ? selected.ownerId : ''}
+                    onChange={(e) => run(store.request('token:assign', { tokenId: selected.id, memberId: e.target.value || null }))}
                   >
-                    🎯 {ft === 5 ? 'Reach 5 ft' : `${ft} ft`}
-                  </button>
-                ))}
-                {state.highlight && (
-                  <button className="chip" onClick={() => run(store.request('highlight:set', { highlight: null }))}>✕ Hide</button>
-                )}
-              </div>
-              {selected.kind !== 'player' && (
-                <button
-                  className="link-button"
-                  onClick={() => {
-                    run(store.request('token:remove', { tokenId: selected.id }));
-                    setSelectedId(null);
-                  }}
-                >
-                  Remove {selected.name}
-                </button>
+                    <option value="">Nobody right now</option>
+                    {players.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
+              <button
+                className="text-button"
+                onClick={() => {
+                  if (!confirm(`Remove ${selected.name} from the map?`)) return;
+                  run(store.request('token:remove', { tokenId: selected.id }));
+                  setSelectedId(null);
+                }}
+              >
+                Remove {selected.name}
+              </button>
             </div>
           ) : (
             <p className="hint">Tap a token on the map to select it. Drag tokens to move them.</p>
           ))}
 
         {panel === 'add' && <AddToken store={store} onAdded={(id) => setSelectedId(id)} />}
+
+        {panel === 'campaign' && <CampaignPanel store={store} state={state} />}
 
         {panel === 'screen' && (
           <div>
@@ -122,7 +134,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
         )}
 
         {panel === 'players' && (
-          <ul className="member-list">
+          <ul className="list">
             {players.length === 0 && <li className="hint">No players yet.</li>}
             {players.map((p) => (
               <li key={p.id}>
@@ -131,7 +143,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
                   {p.name}
                   <span className="hint"> · Seat {seatNumber(p.seat) || '–'}{!p.connected && ' · away'}</span>
                 </span>
-                <button className="small-button" onClick={() => kick(p)}>Remove</button>
+                <button className="button small" onClick={() => kick(p)}>Remove</button>
               </li>
             ))}
           </ul>
@@ -144,7 +156,7 @@ export function DmGame({ store, state }: { store: GameStore; state: RoomState })
 function AddToken({ store, onAdded }: { store: GameStore; onAdded: (id: string) => void }) {
   const [name, setName] = useState('');
   const [kind, setKind] = useState<TokenKind>('monster');
-  const [color, setColor] = useState(TOKEN_COLORS[1]);
+  const [color, setColor] = useState(TOKEN_SHADES[0]);
   const [error, setError] = useState<string | null>(null);
 
   async function add(e: React.FormEvent) {
@@ -160,25 +172,25 @@ function AddToken({ store, onAdded }: { store: GameStore; onAdded: (id: string) 
   }
 
   return (
-    <form className="add-token" onSubmit={add}>
-      <div className="role-toggle small">
-        <button type="button" className={kind === 'monster' ? 'on' : ''} onClick={() => setKind('monster')}>👹 Monster</button>
-        <button type="button" className={kind === 'npc' ? 'on' : ''} onClick={() => setKind('npc')}>🧑 NPC</button>
+    <form className="stack-sm" onSubmit={add}>
+      <div className="segmented">
+        <button type="button" className={kind === 'monster' ? 'on' : ''} onClick={() => setKind('monster')}>Monster</button>
+        <button type="button" className={kind === 'npc' ? 'on' : ''} onClick={() => setKind('npc')}>NPC</button>
       </div>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === 'npc' ? 'e.g. Torva the smith' : 'e.g. Goblin 1'} maxLength={24} aria-label="Token name" />
       <div className="swatches">
-        {TOKEN_COLORS.map((c) => (
+        {TOKEN_SHADES.map((c) => (
           <button
             type="button"
             key={c}
             className={`swatch ${c === color ? 'on' : ''}`}
             style={{ background: c }}
             onClick={() => setColor(c)}
-            aria-label={`Colour ${c}`}
+            aria-label={`Shade ${c}`}
           />
         ))}
       </div>
-      <button className="primary">Add to the map</button>
+      <button className="button primary block">Add to the map</button>
       <p className="hint">It appears in the middle of what the Main Screen shows.</p>
       {error && <p className="error">{error}</p>}
     </form>

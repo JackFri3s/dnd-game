@@ -18,7 +18,10 @@ import {
   type Phase,
   type TableSettings,
   type Token,
+  type World,
+  type CampaignSummary,
 } from '../shared/protocol.ts';
+import type { CampaignExport } from './campaign.ts';
 import { boardBounds, cellToHex, hexToPoint, hexesInRange, hexKey, onBoard, pointToHex } from '../shared/hex.ts';
 
 /** A game nobody has connected to for this long is deleted. */
@@ -37,6 +40,29 @@ interface StoredRoom {
   tokens: Record<string, Token>;
   highlight: Highlight | null;
   nextTokenId: number;
+  /** The campaign loaded in this game; its world is saved to it after every change. */
+  campaign: { key: string; name: string } | null;
+}
+
+const KEY_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const KEY_LENGTH = 10;
+
+function emptyWorld(): World {
+  const board = DEFAULT_BOARD;
+  const b = boardBounds(board);
+  return { board, tokens: {}, view: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, highlight: null, nextTokenId: 1 };
+}
+
+function worldOf(room: StoredRoom): World {
+  return { board: room.board, tokens: room.tokens, view: room.view, highlight: room.highlight, nextTokenId: room.nextTokenId };
+}
+
+function applyWorld(room: StoredRoom, world: World) {
+  room.board = world.board;
+  room.tokens = world.tokens;
+  room.view = world.view;
+  room.highlight = world.highlight;
+  room.nextTokenId = world.nextTokenId;
 }
 
 const DEFAULT_BOARD = { cols: 40, rows: 28 };
@@ -51,6 +77,7 @@ function withDefaults(room: Partial<StoredRoom> & Pick<StoredRoom, 'code' | 'tab
     tokens: {},
     highlight: null,
     nextTokenId: 1,
+    campaign: null,
     ...room,
     board,
     table: {
@@ -175,19 +202,15 @@ export class GameRoom extends DurableObject<Env> {
 
       case 'join': {
         const member = this.join(room, clientId, msg);
-        await this.save();
-        this.broadcast(room);
+        await this.commit(room);
         return { member: this.toMember(member) } satisfies Requests['join']['result'];
       }
 
       case 'leave': {
         // The Main Screen stays a member so it can come back; others are removed.
-        if (me && me.role !== 'table') {
-          delete room.members[clientId];
-          removeTokensOf(room, clientId);
-        }
-        await this.save();
-        this.broadcast(room, ws);
+        // Their token stays on the map (it belongs to the campaign); they get it back when they rejoin.
+        if (me && me.role !== 'table') delete room.members[clientId];
+        await this.commit(room, ws);
         return null;
       }
 
@@ -205,7 +228,6 @@ export class GameRoom extends DurableObject<Env> {
         const target = room.members[msg.memberId];
         if (!target || target.role !== 'player') throw new GameError('Player not found.');
         delete room.members[target.id];
-        removeTokensOf(room, target.id);
         await this.save();
         for (const s of this.ctx.getWebSockets(target.id)) {
           send(s, { type: 'room:kicked' });
@@ -218,11 +240,18 @@ export class GameRoom extends DurableObject<Env> {
       case 'game:phase': {
         requireRole(me, 'dm');
         if (msg.phase !== 'lobby' && msg.phase !== 'playing') throw new GameError('Unknown phase.');
+        if (msg.phase === 'playing' && !room.campaign) throw new GameError('Choose or create a campaign first.');
+        const starting = msg.phase === 'playing' && room.phase !== 'playing';
         room.phase = msg.phase;
         if (msg.phase === 'playing') {
           for (const m of Object.values(room.members)) if (m.role === 'player') ensurePlayerToken(room, m);
         }
-        return this.commit(room);
+        await this.commit(room);
+        if (starting) {
+          const date = new Date().toISOString().slice(0, 10);
+          await this.campaignStub(room.campaign!.key).snapshot(`Session started ${date}`, worldOf(room), true);
+        }
+        return null;
       }
 
       case 'table:calibrate': {
@@ -286,7 +315,6 @@ export class GameRoom extends DurableObject<Env> {
         requireRole(me, 'dm');
         const token = room.tokens[msg.tokenId];
         if (!token) throw new GameError('Token not found.');
-        if (token.kind === 'player') throw new GameError('Player tokens are removed by removing the player.');
         delete room.tokens[token.id];
         if (room.highlight?.tokenId === token.id) room.highlight = null;
         return this.commit(room);
@@ -306,6 +334,126 @@ export class GameRoom extends DurableObject<Env> {
           room.highlight = { tokenId: token.id, kind: h.kind === 'range' ? 'range' : 'move', feet: num(h.feet, 5, 1000) };
         }
         return this.commit(room);
+      }
+
+      case 'token:assign': {
+        requireRole(me, 'dm');
+        const token = room.tokens[msg.tokenId];
+        if (!token || token.kind !== 'player') throw new GameError('Player token not found.');
+        const target = msg.memberId ? room.members[msg.memberId] : null;
+        if (msg.memberId && target?.role !== 'player') throw new GameError('Player not found.');
+        if (target) {
+          // The player's other (e.g. brand new, empty) token is removed: they take over this one.
+          for (const t of Object.values(room.tokens)) {
+            if (t.ownerId === target.id && t.id !== token.id) delete room.tokens[t.id];
+          }
+          Object.assign(token, { ownerId: target.id, color: target.color });
+        } else {
+          token.ownerId = null;
+        }
+        return this.commit(room);
+      }
+
+      // ---------- campaigns ----------
+
+      case 'campaign:list': {
+        requireRole(me, 'dm');
+        const keys = await this.dmIndex(clientId).list();
+        const summaries = await Promise.all(keys.map((k) => this.campaignStub(k).summary()));
+        const campaigns = summaries.filter((c): c is CampaignSummary => !!c).sort((a, b) => b.updatedAt - a.updatedAt);
+        return { campaigns, current: room.campaign?.key ?? null } satisfies Requests['campaign:list']['result'];
+      }
+
+      case 'campaign:create': {
+        requireRole(me, 'dm');
+        const name = cleanTitle(msg.name) || 'New campaign';
+        const campaign = await this.createCampaign(name, emptyWorld());
+        await this.dmIndex(clientId).add(campaign.key);
+        await this.loadCampaign(room, campaign.key);
+        return { campaign } satisfies Requests['campaign:create']['result'];
+      }
+
+      case 'campaign:load': {
+        requireRole(me, 'dm');
+        await this.loadCampaign(room, cleanKey(msg.key));
+        await this.dmIndex(clientId).add(cleanKey(msg.key));
+        return null;
+      }
+
+      case 'campaign:add': {
+        requireRole(me, 'dm');
+        const key = cleanKey(msg.key);
+        const campaign = await this.campaignStub(key).summary();
+        if (!campaign) throw new GameError('No campaign found with that key.');
+        await this.dmIndex(clientId).add(key);
+        return { campaign } satisfies Requests['campaign:add']['result'];
+      }
+
+      case 'campaign:forget': {
+        requireRole(me, 'dm');
+        await this.dmIndex(clientId).remove(cleanKey(msg.key));
+        return null;
+      }
+
+      case 'campaign:rename': {
+        requireRole(me, 'dm');
+        const campaign = requireCampaign(room);
+        campaign.name = cleanTitle(msg.name) || campaign.name;
+        await this.campaignStub(campaign.key).rename(campaign.name);
+        return this.commit(room);
+      }
+
+      case 'campaign:snapshots': {
+        requireRole(me, 'dm');
+        const snapshots = await this.campaignStub(requireCampaign(room).key).listSnapshots();
+        return { snapshots } satisfies Requests['campaign:snapshots']['result'];
+      }
+
+      case 'campaign:snapshot': {
+        requireRole(me, 'dm');
+        const name = cleanTitle(msg.name) || `Save point ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+        const snapshot = await this.campaignStub(requireCampaign(room).key).snapshot(name, worldOf(room), false);
+        return { snapshot } satisfies Requests['campaign:snapshot']['result'];
+      }
+
+      case 'campaign:restore': {
+        requireRole(me, 'dm');
+        const stub = this.campaignStub(requireCampaign(room).key);
+        const world = await stub.getSnapshot(String(msg.snapshotId));
+        if (!world) throw new GameError('Save point not found.');
+        // Keep a safety copy of the current situation first, so a restore can be undone.
+        await stub.snapshot('Before restoring a save point', worldOf(room), true);
+        applyWorld(room, world);
+        if (room.phase === 'playing') {
+          for (const m of Object.values(room.members)) if (m.role === 'player') ensurePlayerToken(room, m);
+        }
+        return this.commit(room);
+      }
+
+      case 'campaign:delete-snapshot': {
+        requireRole(me, 'dm');
+        await this.campaignStub(requireCampaign(room).key).deleteSnapshot(String(msg.snapshotId));
+        return null;
+      }
+
+      case 'campaign:export': {
+        requireRole(me, 'dm');
+        const data = await this.campaignStub(requireCampaign(room).key).exportAll();
+        if (!data) throw new GameError('Campaign not found.');
+        return { data, name: data.name } satisfies Requests['campaign:export']['result'];
+      }
+
+      case 'campaign:import': {
+        requireRole(me, 'dm');
+        const data = parseExport(msg.data);
+        const campaign = await this.createCampaign(data.name, data.world);
+        const stub = this.campaignStub(campaign.key);
+        for (const snap of data.snapshots.slice().reverse()) {
+          await stub.snapshot(snap.info.name, snap.world, snap.info.auto, snap.info.at);
+        }
+        await this.dmIndex(clientId).add(campaign.key);
+        await this.loadCampaign(room, campaign.key);
+        return { campaign } satisfies Requests['campaign:import']['result'];
       }
 
       default:
@@ -360,11 +508,59 @@ export class GameRoom extends DurableObject<Env> {
     await this.scheduleCleanup();
   }
 
-  /** Saves the game and sends the new state to everyone. */
-  private async commit(room: StoredRoom): Promise<null> {
+  /** Saves the game (and its campaign) and sends the new state to everyone. */
+  private async commit(room: StoredRoom, except?: WebSocket): Promise<null> {
+    if (room.campaign) {
+      const saved = await this.campaignStub(room.campaign.key).saveWorld(room.code, worldOf(room));
+      if (!saved) {
+        // The campaign was opened in another game since: this game must stop using it.
+        const name = room.campaign.name;
+        room.campaign = null;
+        room.phase = 'lobby';
+        applyWorld(room, emptyWorld());
+        this.notify(room, `"${name}" was opened in another game, so it was closed here.`);
+      }
+    }
     await this.save();
-    this.broadcast(room);
+    this.broadcast(room, except);
     return null;
+  }
+
+  private notify(room: StoredRoom, text: string) {
+    for (const s of this.ctx.getWebSockets()) {
+      const { clientId } = s.deserializeAttachment() as Attachment;
+      if (room.members[clientId]) send(s, { type: 'notice', text });
+    }
+  }
+
+  private campaignStub(key: string) {
+    return this.env.CAMPAIGN.get(this.env.CAMPAIGN.idFromName(key));
+  }
+
+  private dmIndex(clientId: string) {
+    return this.env.DM_INDEX.get(this.env.DM_INDEX.idFromName(`dm:${clientId}`));
+  }
+
+  private async createCampaign(name: string, world: World): Promise<CampaignSummary> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const bytes = crypto.getRandomValues(new Uint8Array(KEY_LENGTH));
+      const key = Array.from(bytes, (b) => KEY_LETTERS[b % KEY_LETTERS.length]).join('');
+      const stub = this.campaignStub(key);
+      if (await stub.create(key, name, world)) return (await stub.summary())!;
+    }
+    throw new GameError('Could not create a campaign. Please try again.');
+  }
+
+  /** Opens a campaign in this game: its world replaces what's on the board. */
+  private async loadCampaign(room: StoredRoom, key: string) {
+    const opened = await this.campaignStub(key).open(room.code);
+    if (!opened) throw new GameError('No campaign found with that key.');
+    room.campaign = { key, name: opened.summary.name };
+    applyWorld(room, opened.world);
+    if (room.phase === 'playing') {
+      for (const m of Object.values(room.members)) if (m.role === 'player') ensurePlayerToken(room, m);
+    }
+    await this.commit(room);
   }
 
   private async scheduleCleanup() {
@@ -386,6 +582,7 @@ export class GameRoom extends DurableObject<Env> {
       code: room.code,
       members: Object.values(room.members).map((m) => this.toMember(m, except)),
       phase: room.phase,
+      campaign: room.campaign && { name: room.campaign.name },
       table: room.table,
       view: room.view,
       board: room.board,
@@ -502,11 +699,35 @@ function ensurePlayerToken(room: StoredRoom, member: StoredMember) {
   addToken(room, { name: member.name, kind: 'player', color: member.color, ownerId: member.id, ...freeHexNear(room, viewHex(room)) });
 }
 
-function removeTokensOf(room: StoredRoom, memberId: string) {
-  for (const t of Object.values(room.tokens)) {
-    if (t.ownerId === memberId) {
-      delete room.tokens[t.id];
-      if (room.highlight?.tokenId === t.id) room.highlight = null;
-    }
+function requireCampaign(room: StoredRoom) {
+  if (!room.campaign) throw new GameError('No campaign is loaded.');
+  return room.campaign;
+}
+
+function cleanTitle(value: unknown): string {
+  return typeof value === 'string' ? value.trim().slice(0, 60) : '';
+}
+
+function cleanKey(value: unknown): string {
+  const key = typeof value === 'string' ? value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+  if (key.length !== KEY_LENGTH) throw new GameError('A campaign key has 10 letters and numbers.');
+  return key;
+}
+
+/** Checks an uploaded backup file before importing it. */
+function parseExport(data: unknown): CampaignExport {
+  const d = data as CampaignExport;
+  const validWorld = (w: World) =>
+    w && typeof w === 'object' && w.board && Number.isInteger(w.board.cols) && Number.isInteger(w.board.rows) &&
+    w.board.cols > 0 && w.board.cols <= 500 && w.board.rows > 0 && w.board.rows <= 500 &&
+    w.tokens && typeof w.tokens === 'object' && w.view && Number.isFinite(w.view.x) && Number.isFinite(w.view.y) &&
+    Number.isInteger(w.nextTokenId);
+  if (!d || d.format !== 'dnd-campaign' || d.version !== 1 || !validWorld(d.world)) {
+    throw new GameError('This file is not a campaign backup from this app.');
   }
+  return {
+    ...d,
+    name: cleanTitle(d.name) || 'Imported campaign',
+    snapshots: Array.isArray(d.snapshots) ? d.snapshots.filter((s) => s?.info && validWorld(s.world)).slice(0, 200) : [],
+  };
 }

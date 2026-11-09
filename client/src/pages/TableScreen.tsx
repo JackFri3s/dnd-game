@@ -4,6 +4,7 @@ import { SEATS, type Member, type RoomState } from '../../../shared/protocol.ts'
 import { GameStore, useGame } from '../game.ts';
 import { SIDE_ROTATION } from '../seats.ts';
 import { HexBoard } from '../components/HexBoard.tsx';
+import { read, write } from '../socket.ts';
 import { CalibrationCard } from '../components/CalibrationCard.tsx';
 
 const store = new GameStore('table');
@@ -39,7 +40,7 @@ export function TableScreen() {
   const joinUrl = code ? `${window.location.origin}/join?code=${code}` : '';
   useEffect(() => {
     if (!joinUrl) return;
-    QRCode.toDataURL(joinUrl, { margin: 1, width: 360, color: { dark: '#2b2118', light: '#fbf6ea' } })
+    QRCode.toDataURL(joinUrl, { margin: 1, width: 360, color: { dark: '#000000', light: '#ffffff' } })
       .then(setQr)
       .catch(() => setQr(null));
   }, [joinUrl]);
@@ -62,6 +63,22 @@ export function TableScreen() {
       window.removeEventListener('resize', report);
     };
   }, [joined]);
+
+  // Calibration belongs to this screen: remember it here, and reuse it in every new game.
+  const table = game.state?.table;
+  useEffect(() => {
+    if (!joined || !table) return;
+    if (table.calibrated && !table.calibrating) {
+      write('dnd.calibration', JSON.stringify({ pxPerMm: table.pxPerMm, hexMm: table.hexMm }));
+    } else if (!table.calibrated && !table.calibrating) {
+      try {
+        const saved = JSON.parse(read('dnd.calibration') ?? 'null');
+        if (saved) store.request('table:calibrate', { ...saved, done: true }).catch(() => {});
+      } catch {
+        // ignore a broken saved value
+      }
+    }
+  }, [joined, table?.calibrated, table?.calibrating, table?.pxPerMm, table?.hexMm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A keyboard on the Main Screen can also fine-tune the calibration (+ / - keys).
   const calibrating = game.state?.table.calibrating;
@@ -102,7 +119,7 @@ export function TableScreen() {
         <section className="table-center">
           <h1 className="title small">dnd</h1>
           <p>{game.notice}</p>
-          <button className="primary narrow" onClick={() => store.open(code!)}>Use this screen instead</button>
+          <button className="button primary" onClick={() => store.open(code!)}>Use this screen instead</button>
         </section>
       </main>
     );
@@ -144,8 +161,9 @@ export function TableScreen() {
             <p className="player-count">
               {players.length} {players.length === 1 ? 'player' : 'players'} at the table
             </p>
+            {state_campaign(game.state)}
             {dm && <p className="player-count">The Dungeon Master starts the game from their device.</p>}
-            <button className="link-button" onClick={newGame}>Start a new game</button>
+            <button className="text-button" onClick={newGame}>Start a new game</button>
           </>
         )}
       </section>
@@ -184,8 +202,17 @@ function TableBoard({ state, code, connected }: { state: RoomState; code: string
         <span>
           Join: <strong>{window.location.host}/join</strong> · code <strong>{code}</strong>
         </span>
+        {state.campaign && <span>{state.campaign.name}</span>}
         {!state.table.calibrated && <span className="hint">Not calibrated: the DM can calibrate for miniatures.</span>}
       </div>
     </main>
   );
+}
+
+function state_campaign(state: RoomState | null) {
+  return state?.campaign ? (
+    <p className="campaign-title">
+      Campaign: <strong>{state.campaign.name}</strong>
+    </p>
+  ) : null;
 }

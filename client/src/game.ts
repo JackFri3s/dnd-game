@@ -81,6 +81,10 @@ export class GameStore {
     return this.conn.request(type, args);
   }
 
+  dismissNotice() {
+    this.set({ notice: null });
+  }
+
   /** Connects to a game without joining it (used to look at it while joining). */
   open(code: string) {
     this.disconnect();
@@ -100,6 +104,7 @@ export class GameStore {
         );
       },
       onState: (state) => conn === this.conn && this.set({ state }),
+      onNotice: (text) => conn === this.conn && this.set({ notice: text }),
       onStatus: (status) => conn === this.conn && this.set({ status }),
       onEnd: (reason) => {
         if (conn !== this.conn) return;

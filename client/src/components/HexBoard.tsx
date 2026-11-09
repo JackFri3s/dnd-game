@@ -296,7 +296,7 @@ export function HexBoard({
               y={tableArea.center.y - tableArea.h / 2 + 20 * px}
               fontSize={13 * px}
             >
-              ✥ Main Screen – drag to move
+              Main Screen · drag to move
             </text>
           </g>
         )}

@@ -10,8 +10,15 @@
     "run_worker_first": ["/api/*", "/ws/*"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoom" }]
+    "bindings": [
+      { "name": "GAME_ROOM", "class_name": "GameRoom" },
+      { "name": "CAMPAIGN", "class_name": "Campaign" },
+      { "name": "DM_INDEX", "class_name": "DmIndex" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["Campaign", "DmIndex"] }
+  ],
   "observability": { "enabled": true }
 }

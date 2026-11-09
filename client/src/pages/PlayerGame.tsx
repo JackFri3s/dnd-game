@@ -3,8 +3,7 @@ import type { Highlight, Member, RoomState } from '../../../shared/protocol.ts';
 import { hexToPoint } from '../../../shared/hex.ts';
 import type { GameStore } from '../game.ts';
 import { HexBoard, type Camera } from '../components/HexBoard.tsx';
-
-const RANGES = [5, 30, 60, 120];
+import { RangeChips } from '../components/RangeChips.tsx';
 
 /** A player's phone during play: their own view of the map, and their token's controls. */
 export function PlayerGame({
@@ -27,7 +26,6 @@ export function PlayerGame({
   const [error, setError] = useState<string | null>(null);
   const run = (p: Promise<unknown>) => p.then(() => setError(null), (e: Error) => setError(e.message));
 
-  const mine = myToken && state.highlight?.tokenId === myToken.id ? state.highlight : null;
   const show = (h: Omit<Highlight, 'tokenId'> | null) =>
     myToken && run(store.request('highlight:set', { highlight: h && { ...h, tokenId: myToken.id } }));
   const dm = state.members.find((m) => m.role === 'dm');
@@ -37,16 +35,19 @@ export function PlayerGame({
       <header className="game-bar">
         <span className="badge-dot big" style={{ background: me.color }} />
         <strong className="grow">{me.name}</strong>
-        <button className="small-button" onClick={() => myToken && setCamera({ ...camera, ...hexToPoint(myToken) })}>
-          ◎ Find me
+        <button className="button small" onClick={() => myToken && setCamera({ ...camera, ...hexToPoint(myToken) })}>
+          Find me
         </button>
-        <button className="small-button" onClick={() => setMenu(!menu)} aria-expanded={menu}>☰</button>
+        <button className="button small" onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu">☰</button>
       </header>
       {menu && (
         <div className="game-menu">
-          <p className="hint">Game {state.code} · DM: {dm?.name ?? 'none yet'}</p>
-          {!dm && <button className="link-button" onClick={onSwitchRole}>Be the Dungeon Master instead</button>}
-          <button className="link-button" onClick={() => store.leave()}>Leave game</button>
+          <p className="hint">
+            {state.campaign?.name} · game {state.code} · DM: {dm?.name ?? 'none yet'}
+          </p>
+          {!dm && <button className="text-button" onClick={onSwitchRole}>Be the Dungeon Master instead</button>}
+          <a className="text-button" href="/settings">Settings</a>
+          <button className="text-button" onClick={() => store.leave()}>Leave game</button>
         </div>
       )}
       <div className="game-board">
@@ -64,28 +65,11 @@ export function PlayerGame({
         {myToken ? (
           <>
             <p className="hint">Drag your token to move it. Show on every screen:</p>
-            <div className="chip-row">
-              <button
-                className={`chip ${mine?.kind === 'move' ? 'on' : ''}`}
-                onClick={() => show({ kind: 'move', feet: myToken.speedFt })}
-              >
-                🥾 Movement {myToken.speedFt} ft
-              </button>
-              {RANGES.map((ft) => (
-                <button
-                  key={ft}
-                  className={`chip ${mine?.kind === 'range' && mine.feet === ft ? 'on' : ''}`}
-                  onClick={() => show({ kind: 'range', feet: ft })}
-                >
-                  🎯 {ft === 5 ? 'Reach 5 ft' : `${ft} ft`}
-                </button>
-              ))}
-              {mine && (
-                <button className="chip" onClick={() => show(null)}>
-                  ✕ Hide
-                </button>
-              )}
-            </div>
+            <RangeChips
+              token={myToken}
+              highlight={state.highlight?.tokenId === myToken.id ? state.highlight : null}
+              onShow={show}
+            />
           </>
         ) : (
           <p className="hint">Your token will appear when the Dungeon Master places it.</p>

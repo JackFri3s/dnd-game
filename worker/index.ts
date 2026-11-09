@@ -1,5 +1,6 @@
 import { CODE_LENGTH, CODE_LETTERS } from '../shared/protocol.ts';
 export { GameRoom } from './room.ts';
+export { Campaign, DmIndex } from './campaign.ts';
 
 // The Worker is the front door: it serves the game API and sends each
 // game's connections to that game's own GameRoom (a Durable Object).

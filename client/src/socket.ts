@@ -77,6 +77,7 @@ interface Handlers {
   onState: (state: RoomState) => void;
   onStatus: (status: ConnectionStatus) => void;
   onEnd: (reason: EndReason) => void; // the game won't reconnect by itself
+  onNotice: (text: string) => void; // a message from the game, e.g. "campaign opened elsewhere"
 }
 
 /**
@@ -171,6 +172,7 @@ export class GameConnection {
         if (msg.ok) p?.resolve(msg.data);
         else p?.reject(new Error(msg.error));
       } else if (msg.type === 'room:state') this.handlers.onState(msg.state);
+      else if (msg.type === 'notice') this.handlers.onNotice(msg.text);
     };
     ws.onclose = (e) => {
       if (this.ws !== ws) return;

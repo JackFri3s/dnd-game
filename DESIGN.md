@@ -10,6 +10,8 @@ A digital tabletop role-playing game for a group sitting around a real table. A 
 
 | Topic | Decision |
 |---|---|
+| Look | **Minimal and greyscale** (black, white, greys). Colour only where it means something: each player's token colour (muted) and connection status. |
+| Distances | Shown in **hexes** by default; each device can choose hexes, feet or metres in **Settings** (home menu). The rules still work in feet internally (1 hex = 5 ft = 1.5 m). |
 | Platform | Web app: every device just opens a browser. Nothing to install. |
 | Hosting | **On the internet** (option a). Players join with a room code or QR code. |
 | DM | Always a human with their own device, in full control. No AI DM. |
@@ -168,6 +170,11 @@ The SRD covers the core mechanics, combat, conditions, spells, many monsters, eq
 
 ## 9. Saving: exact restore
 
+- **Campaign vs game:** a *campaign* is the saved world (maps, tokens, characters, ...). A *game* is one evening's connection (the 4-letter code on the Main Screen). The DM opens a campaign in a game; every change is written to the campaign immediately. A campaign can only be open in one game at a time.
+- **Save points:** made by the DM at any time, and automatically at the start of each session and before going back to an earlier save point (so going back can be undone).
+- **Backups:** the DM can download a campaign (with its save points) as a file and upload it later as a new campaign.
+- **Campaign key:** each campaign has a 10-character secret key. The DM's device remembers its campaigns; entering the key on another device adds the campaign there. (Proper accounts may come later.)
+- **Players** are recognised by their device: rejoining from the same phone gives them their token back. On a new phone, the DM hands them their token.
 - **Everything lives on the server** in a database: maps (seeds + DM edits), tokens and positions, characters, HP, spell slots, conditions, inventory, initiative and the current turn, fog of war, NPCs, DM notes, and what the Main Screen is showing.
 - **Autosave after every change.** No "save" button is needed (a manual named save or snapshot is also available).
 - **Event log:** every action is recorded. This allows undo and a session recap ("last time on...").
