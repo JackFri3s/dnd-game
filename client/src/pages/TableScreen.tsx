@@ -1,47 +1,39 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { SEATS, type Member } from '../../../shared/protocol.ts';
-import { clientId, loadSession, request, saveSession } from '../socket.ts';
-import { useConnected, useOnConnect, useRoomState } from '../hooks.ts';
+import { GameStore, useGame } from '../game.ts';
 import { SIDE_ROTATION } from '../seats.ts';
 
-/** Opens (or re-opens) this device's game. Shared so a double call can't create two games. */
-let opening: Promise<string> | null = null;
-async function openRoom(): Promise<string> {
-  const saved = loadSession('table');
-  if (saved) {
-    try {
-      await request('room:rejoin', { clientId, code: saved.code });
-      return saved.code;
-    } catch {
-      // the old game is gone (e.g. server restarted): make a new one
-    }
-  }
-  const { code } = await request('room:create', { clientId });
-  saveSession({ code, role: 'table' }, 'table');
-  return code;
+const store = new GameStore('table');
+let starting = false; // guards against starting two games at once
+
+function startNewGame(setError: (e: string | null) => void) {
+  if (starting) return;
+  starting = true;
+  store
+    .create()
+    .then(() => setError(null), (e: Error) => setError(e.message))
+    .finally(() => {
+      starting = false;
+    });
 }
 
 export function TableScreen() {
-  const connected = useConnected();
-  const [state] = useRoomState();
-  const [code, setCode] = useState<string | null>(null);
+  const game = useGame(store);
   const [error, setError] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
 
-  useOnConnect(() => {
-    opening ??= openRoom().finally(() => {
-      opening = null;
-    });
-    opening.then(
-      (c) => {
-        setCode(c);
-        setError(null);
-      },
-      (e: Error) => setError(e.message),
-    );
+  // Open last time's game on this screen, or start a new one.
+  useEffect(() => {
+    if (!store.getSnapshot().code && !store.resume()) startNewGame(setError);
   }, []);
 
+  // The saved game is gone (e.g. deleted after a long time): start a fresh one.
+  useEffect(() => {
+    if (game.ended === 'no-room') startNewGame(setError);
+  }, [game.ended]);
+
+  const code = game.code;
   const joinUrl = code ? `${window.location.origin}/join?code=${code}` : '';
   useEffect(() => {
     if (!joinUrl) return;
@@ -50,17 +42,25 @@ export function TableScreen() {
       .catch(() => setQr(null));
   }, [joinUrl]);
 
-  const members = state?.code === code ? state.members : [];
+  const members = game.state?.members ?? [];
   const dm = members.find((m) => m.role === 'dm');
   const players = members.filter((m) => m.role === 'player');
 
   function newGame() {
     if (!confirm('Start a new game? Everyone will need to join again.')) return;
-    setCode(null);
-    request('room:create', { clientId }).then(({ code: c }) => {
-      saveSession({ code: c, role: 'table' }, 'table');
-      setCode(c);
-    });
+    startNewGame(setError);
+  }
+
+  if (game.ended === 'replaced') {
+    return (
+      <main className="table-screen">
+        <section className="table-center">
+          <h1 className="title small">dnd</h1>
+          <p>{game.notice}</p>
+          <button className="primary narrow" onClick={() => store.open(code!)}>Use this screen instead</button>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -79,7 +79,7 @@ export function TableScreen() {
       <section className="table-center">
         <h1 className="title small">dnd</h1>
         {error && <p className="error">{error}</p>}
-        {!connected && <p className="status warn">Connecting to the server…</p>}
+        {code && game.status !== 'open' && <p className="status warn">Connecting to the game…</p>}
         {code && (
           <>
             <p className="label">Scan to join, or go to</p>

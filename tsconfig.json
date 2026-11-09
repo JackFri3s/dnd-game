@@ -1,4 +1,5 @@
 {
+  // Web app (runs in the browser). The game server has its own: worker/tsconfig.json
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -9,7 +10,7 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
-  "include": ["client/src", "server", "shared", "vite.config.ts"]
+  "include": ["client/src", "shared", "vite.config.ts"]
 }

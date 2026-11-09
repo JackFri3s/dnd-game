@@ -177,12 +177,12 @@ The SRD covers the core mechanics, combat, conditions, spells, many monsters, eq
 |---|---|---|
 | Language | **TypeScript** everywhere | One language for every screen and the server; it catches mistakes early. |
 | Screens (frontend) | **React** for menus and sheets, **PixiJS** (WebGL) for drawing the hex map | Fast, smooth rendering of large maps and many tokens on tablets. |
-| Real-time connection | **WebSockets** (e.g. Socket.IO) | All screens update instantly. |
-| Server (backend) | **Node.js** | Holds the authoritative game state and applies the rules, so devices can't get out of sync. |
-| Database | **PostgreSQL** (SQLite for local development) | Reliable saving. |
+| Real-time connection | **WebSockets** | All screens update instantly. |
+| Server (backend) | **Cloudflare Workers + Durable Objects** (one per game) | Holds the authoritative game state and applies the rules, so devices can't get out of sync. |
+| Database | Each game's **Durable Object storage** (SQLite, built in) | Reliable saving; a game's data lives with its server. |
 | Hex maths | Axial/cube coordinates (the well-known approach from Red Blob Games) | Simple distance, range, line-of-sight and area calculations on hexes. |
 | Procedural generation | Seeded random generator + noise for terrain, templates for buildings, name generators | Repeatable, editable maps. |
-| Hosting | A cloud host (e.g. Fly.io, Render or Railway) | Cheap or free to start. |
+| Hosting | **Cloudflare** (the Chasing the Moon account, paid Workers plan) | Fast everywhere, no sleeping, auto-deploys from GitHub. |
 
 **Account/login:** keep it simple at first. The DM has an account (to own campaigns); players join with a room code and claim their character.
 

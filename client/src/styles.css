@@ -149,3 +149,4 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   border: 3px solid; background: var(--paper-2); font-weight: 600; font-size: 1.15rem; box-shadow: var(--shadow);
 }
 .player-badge.away { opacity: 0.5; }
+.primary.narrow { width: auto; padding: 12px 24px; margin-top: 12px; }

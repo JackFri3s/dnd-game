@@ -1,101 +1,51 @@
 import { useEffect, useState } from 'react';
 import { SEATS, type Member, type RoomState, type SeatId } from '../../../shared/protocol.ts';
-import { clientId, loadSession, request, saveSession, socket } from '../socket.ts';
-import { useConnected, useOnConnect, useRoomState } from '../hooks.ts';
+import { clientId, peekRoom, read, write } from '../socket.ts';
+import { GameStore, useGame } from '../game.ts';
 
 type Role = 'player' | 'dm';
-
-function readName(): string {
-  try {
-    return localStorage.getItem('dnd.name') ?? '';
-  } catch {
-    return '';
-  }
-}
-function writeName(name: string) {
-  try {
-    localStorage.setItem('dnd.name', name);
-  } catch {
-    // ignore
-  }
-}
+const stores = { player: new GameStore('player'), dm: new GameStore('dm') };
 
 export function JoinScreen({ role }: { role: Role }) {
-  const connected = useConnected();
-  const [state, setState] = useRoomState();
-  const [me, setMe] = useState<Member | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const store = stores[role];
+  const game = useGame(store);
 
-  // Come back into the game automatically after a reload or lost connection.
-  useOnConnect(() => {
-    const saved = loadSession(role);
-    if (!saved) return;
-    request('room:rejoin', { clientId, code: saved.code }).then(
-      ({ member }) => setMe(member),
-      (e: Error) => {
-        saveSession(null, role);
-        setMe(null);
-        setNotice(e.message);
-      },
-    );
-  }, [role]);
-
+  // Come back into the game automatically after a reload.
   useEffect(() => {
-    const kicked = () => {
-      saveSession(null, role);
-      setMe(null);
-      setState(null);
-      setNotice('The Dungeon Master removed you from the game.');
-    };
-    socket.on('room:kicked', kicked);
-    return () => {
-      socket.off('room:kicked', kicked);
-    };
-  }, [role, setState]);
+    store.resume();
+  }, [store]);
 
-  // Keep "me" up to date with the latest room state (seat, colour, ...).
-  const current = state?.members.find((m) => m.id === clientId) ?? me;
-
-  function leave() {
-    socket.emit('room:leave');
-    saveSession(null, role);
-    setMe(null);
-    setState(null);
-  }
-
+  const inGame = game.me && game.state;
   return (
     <main className="page join">
       <header className="join-header">
         <a href="/" className="title small">dnd</a>
-        <span className={`dot ${connected ? 'on' : 'off'}`} title={connected ? 'Connected' : 'Offline'} />
+        {game.code && (
+          <span className={`dot ${game.status === 'open' ? 'on' : 'off'}`} title={game.status === 'open' ? 'Connected' : 'Offline'} />
+        )}
       </header>
-      {!connected && <p className="status warn">Connecting to the server…</p>}
-      {notice && <p className="status">{notice}</p>}
-      {me && current && state ? (
+      {inGame && game.status !== 'open' && <p className="status warn">Connection lost, reconnecting…</p>}
+      {game.notice && <p className="status">{game.notice}</p>}
+      {game.ended === 'replaced' ? (
+        <button className="primary" onClick={() => store.open(game.code!)}>Use this device instead</button>
+      ) : inGame ? (
         role === 'player' ? (
-          <PlayerLobby me={current} state={state} onLeave={leave} />
+          <PlayerLobby store={store} me={game.me!} state={game.state!} />
         ) : (
-          <DmLobby me={current} state={state} onLeave={leave} />
+          <DmLobby store={store} me={game.me!} state={game.state!} />
         )
       ) : (
-        <JoinForm
-          role={role}
-          onJoined={(member, code) => {
-            saveSession({ code, role }, role);
-            setNotice(null);
-            setMe(member);
-          }}
-        />
+        <JoinForm store={store} role={role} />
       )}
     </main>
   );
 }
 
-function JoinForm({ role, onJoined }: { role: Role; onJoined: (m: Member, code: string) => void }) {
+function JoinForm({ store, role }: { store: GameStore; role: Role }) {
   const [code, setCode] = useState(
     () => new URLSearchParams(window.location.search).get('code')?.toUpperCase() ?? '',
   );
-  const [name, setName] = useState(readName);
+  const [name, setName] = useState(() => read('dnd.name') ?? '');
   const [seat, setSeat] = useState<SeatId | null>(null);
   const [preview, setPreview] = useState<RoomState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -106,7 +56,7 @@ function JoinForm({ role, onJoined }: { role: Role; onJoined: (m: Member, code: 
     setPreview(null);
     if (code.length !== 4) return;
     let cancelled = false;
-    request('room:peek', code).then(
+    peekRoom(code).then(
       (s) => {
         if (cancelled) return;
         setPreview(s);
@@ -129,12 +79,11 @@ function JoinForm({ role, onJoined }: { role: Role; onJoined: (m: Member, code: 
     setBusy(true);
     setError(null);
     try {
-      const { member } = await request('room:join', { clientId, code, role, name, seat });
-      writeName(name.trim());
-      onJoined(member, code);
+      await store.join(code, { role, name, seat });
+      write('dnd.name', name.trim());
     } catch (err) {
       setError((err as Error).message);
-      if (code.length === 4) request('room:peek', code).then(setPreview, () => {});
+      if (code.length === 4) peekRoom(code).then(setPreview, () => {});
     } finally {
       setBusy(false);
     }
@@ -182,14 +131,14 @@ function JoinForm({ role, onJoined }: { role: Role; onJoined: (m: Member, code: 
   );
 }
 
-function PlayerLobby({ me, state, onLeave }: { me: Member; state: RoomState; onLeave: () => void }) {
+function PlayerLobby({ store, me, state }: { store: GameStore; me: Member; state: RoomState }) {
   const [error, setError] = useState<string | null>(null);
   const taken = new Set(state.members.filter((m) => m.role === 'player' && m.id !== me.id).map((m) => m.seat));
   const dm = state.members.find((m) => m.role === 'dm');
   const others = state.members.filter((m) => m.role === 'player' && m.id !== me.id);
 
   function changeSeat(seat: SeatId) {
-    request('seat:change', seat).then(() => setError(null), (e: Error) => setError(e.message));
+    store.request('seat:change', { seat }).then(() => setError(null), (e: Error) => setError(e.message));
   }
 
   return (
@@ -217,19 +166,19 @@ function PlayerLobby({ me, state, onLeave }: { me: Member; state: RoomState; onL
           </li>
         ))}
       </ul>
-      <button className="link-button" onClick={onLeave}>Leave game</button>
+      <button className="link-button" onClick={() => store.leave()}>Leave game</button>
     </section>
   );
 }
 
-function DmLobby({ me, state, onLeave }: { me: Member; state: RoomState; onLeave: () => void }) {
+function DmLobby({ store, me, state }: { store: GameStore; me: Member; state: RoomState }) {
   const [error, setError] = useState<string | null>(null);
   const players = state.members.filter((m) => m.role === 'player');
   const table = state.members.find((m) => m.role === 'table');
 
   function kick(p: Member) {
     if (!confirm(`Remove ${p.name} from the game?`)) return;
-    request('dm:kick', p.id).then(() => setError(null), (e: Error) => setError(e.message));
+    store.request('dm:kick', { memberId: p.id }).then(() => setError(null), (e: Error) => setError(e.message));
   }
 
   return (
@@ -255,7 +204,7 @@ function DmLobby({ me, state, onLeave }: { me: Member; state: RoomState; onLeave
       </ul>
       {error && <p className="error">{error}</p>}
       <p className="hint">Map, characters and combat tools arrive in the next steps.</p>
-      <button className="link-button" onClick={onLeave}>Leave game</button>
+      <button className="link-button" onClick={() => store.leave()}>Leave game</button>
     </section>
   );
 }

@@ -18,7 +18,7 @@ Step 1 of the build order is done: **connecting the screens.**
 - The Main Screen shows each player's name at their seat, turned to face them.
 - Phones that reload or lose connection rejoin automatically. The DM can remove players.
 
-Games are kept in the server's memory for now; saving to a database is step 3.
+Games are stored by Cloudflare, so they survive server restarts and updates. (Saving the full game, such as map, characters and combat, comes with those features.)
 
 ## Run it on your computer
 
@@ -29,20 +29,27 @@ npm install
 npm run dev
 ```
 
-Then open <http://localhost:5173>. Phones on the same Wi-Fi can open the "Network" address that the command prints.
+Then open <http://localhost:5173>. Phones on the same Wi-Fi can open the "Network" address that the command prints. This runs a local copy of Cloudflare, so it behaves like the real thing.
 
-## Put it online (free, on Render)
+## Hosting: Cloudflare Workers
 
-1. Create an account at <https://render.com> and connect your GitHub account.
-2. Choose **New → Blueprint** and pick this repository. Render reads `render.yaml` and sets everything up.
-3. After a few minutes you get a web address like `https://dnd-xxxx.onrender.com`. Open `/table` on that address on the Main Screen.
+The game runs on **Cloudflare Workers**. Each game gets its own **Durable Object**: a small server on Cloudflare that every device in that game connects to, and that stores the game.
 
-The free plan sleeps after 15 minutes without visitors; the first visit after that takes about a minute to wake it up.
+**One-time setup (in the Cloudflare dashboard):**
+1. Go to **Workers & Pages → Create → Import a repository** and pick `dnd-game` (connect GitHub if asked).
+2. Use these settings: project name **`dnd`**, build command **`npm run build`**, deploy command **`npx wrangler deploy`**. Leave the rest as is.
+3. Click **Deploy**. When it's done, the game is at `https://dnd.<your-account>.workers.dev`.
+4. Optional: to use your own address, open the Worker → **Settings → Domains & Routes → Add → Custom domain** and enter e.g. `dnd.chasingthemoon.org`.
+
+After that, every change pushed to the `main` branch goes live automatically.
+
+You can also deploy from your own computer with `npm run deploy` (it asks you to log in to Cloudflare the first time).
 
 ## Project layout
 
 | Folder | What's in it |
 |---|---|
 | `client/` | The web app all screens use (React). |
-| `server/` | The game server that connects the screens (Node.js, Socket.IO). |
-| `shared/` | Definitions used by both, like the list of messages and seats. |
+| `worker/` | The game server on Cloudflare: `index.ts` is the front door, `room.ts` is one game (a Durable Object). |
+| `shared/` | Definitions used by both, like the messages and the seats. |
+| `wrangler.jsonc` | Cloudflare settings. |

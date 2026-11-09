@@ -1,4 +1,4 @@
-// Messages and data shared between the server and every screen.
+// Messages and data shared between the game server and every screen.
 
 export type Role = 'table' | 'player' | 'dm';
 
@@ -22,7 +22,7 @@ export type SeatId = (typeof SEATS)[number]['id'];
 export type Side = (typeof SEATS)[number]['side'];
 
 export interface Member {
-  id: string; // stable id, kept in the device's browser so it can reconnect
+  id: string; // stable id kept in the device's browser, so it can reconnect
   role: Role;
   name: string;
   seat: SeatId | null; // players only
@@ -40,37 +40,39 @@ export const PLAYER_COLORS = [
   '#8f4fd9', '#2fb3b3', '#d94f9b', '#7a7a7a',
 ];
 
-// ---- client -> server ----
-export interface CreateRoomRequest {
-  clientId: string;
-}
-export interface JoinRequest {
-  clientId: string;
-  code: string;
-  role: 'player' | 'dm';
-  name: string;
-  seat?: SeatId | null;
-}
-export interface RejoinRequest {
-  clientId: string;
-  code: string;
-}
+export const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O: easy to read off a screen
+export const CODE_LENGTH = 4;
+export const MAX_NAME_LENGTH = 24;
 
-export type Ack<T> = (res: { ok: true; data: T } | { ok: false; error: string }) => void;
+// ---------------------------------------------------------------------------
+// HTTP
+//   POST /api/rooms            { clientId }  -> { code }        (Main Screen creates a game)
+//   GET  /api/rooms/:code                    -> RoomState       (look at a game before joining)
+// WebSocket
+//   /ws/:code?clientId=...     one connection per device per game
+// ---------------------------------------------------------------------------
 
-export interface ClientToServer {
-  'room:create': (req: CreateRoomRequest, ack: Ack<{ code: string }>) => void;
-  'room:join': (req: JoinRequest, ack: Ack<{ member: Member }>) => void;
-  'room:rejoin': (req: RejoinRequest, ack: Ack<{ member: Member }>) => void;
-  'room:peek': (code: string, ack: Ack<RoomState>) => void;
-  'room:leave': () => void;
-  'seat:change': (seat: SeatId, ack: Ack<null>) => void;
-  'dm:kick': (memberId: string, ack: Ack<null>) => void;
+/** Requests a device can send over the WebSocket, and what each one answers. */
+export interface Requests {
+  join: { args: { role: 'player' | 'dm'; name: string; seat: SeatId | null }; result: { member: Member } };
+  rejoin: { args: Record<string, never>; result: { member: Member } };
+  leave: { args: Record<string, never>; result: null };
+  'seat:change': { args: { seat: SeatId }; result: null };
+  'dm:kick': { args: { memberId: string }; result: null };
 }
+export type RequestName = keyof Requests;
 
-// ---- server -> client ----
-export interface ServerToClient {
-  'room:state': (state: RoomState) => void;
-  'room:kicked': () => void;
-  'room:closed': () => void;
-}
+export type ClientMessage = {
+  [K in RequestName]: { id: number; type: K } & Requests[K]['args'];
+}[RequestName];
+
+export type ServerMessage =
+  | { type: 'reply'; id: number; ok: true; data: unknown }
+  | { type: 'reply'; id: number; ok: false; error: string }
+  | { type: 'room:state'; state: RoomState }
+  | { type: 'room:kicked' };
+
+/** WebSocket close codes with a special meaning (the client should not reconnect). */
+export const CLOSE_REPLACED = 4000; // the same device opened the game somewhere else
+export const CLOSE_KICKED = 4001; // the DM removed this player
+export const CLOSE_NO_ROOM = 4004; // this game doesn't exist

@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dnd",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    // The web app is a single page: unknown paths (e.g. /table, /join) load index.html.
+    "not_found_handling": "single-page-application",
+    // These paths go to the game server instead of the web app files.
+    "run_worker_first": ["/api/*", "/ws/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }],
+  "observability": { "enabled": true }
+}
